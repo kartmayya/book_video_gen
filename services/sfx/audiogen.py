@@ -29,6 +29,9 @@ def load_model() -> AudioGen:
 
 
 def _tensor_to_wav_b64(tensor: torch.Tensor, sample_rate: int) -> str:
+    # AudioGen returns tensors on the GPU, but torchaudio.save (and the resampler
+    # below) require CPU tensors, so move it off the device first.
+    tensor = tensor.detach().cpu()
     # tensor shape: (channels, samples) or (samples,)
     if tensor.dim() == 1:
         tensor = tensor.unsqueeze(0)
