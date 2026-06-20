@@ -70,7 +70,7 @@ def _build_filter_cmd(
 
     if has_sfx:
         filters.append("[0:a]anull[vocal]")
-        filters.append(f"[1:a]aloop=loop=-1,atrim=duration={target_sec}[ambient]")
+        filters.append(f"[1:a]atrim=duration={target_sec}[ambient]")
         filters.append(
             "[vocal][ambient]amix=inputs=2:duration=first:weights=1 0.55[out]"
         )
@@ -144,6 +144,16 @@ async def mix_multi_dialogue(
     combined_vocal = _concat_dialogues(dialogue_pcms, gap_ms)
     vocal_samples = len(combined_vocal) // TARGET_WIDTH
     vocal_dur_ms = int(vocal_samples / TARGET_RATE * 1000)
+
+    # Loop SFX in Python to fill total duration (avoids ffmpeg aloop pipe issues)
+    if has_sfx:
+        sfx_samples = len(sfx_pcm) // TARGET_WIDTH  # type: ignore[arg-type]
+        target_samples = int(TARGET_RATE * total_duration_ms / 1000)
+        if sfx_samples > 0 and target_samples > sfx_samples:
+            repeats = (target_samples // sfx_samples) + 1
+            sfx_pcm = sfx_pcm * repeats  # type: ignore[operator]
+            sfx_pcm = sfx_pcm[: target_samples * TARGET_WIDTH]  # type: ignore[index]
+
     print(
         f"[multi_mixer] {n_dialogue} lines -> combined {len(combined_vocal)} bytes"
         f" ({vocal_dur_ms}ms), total={total_duration_ms}ms, gap={gap_ms}ms, sfx={has_sfx}",
