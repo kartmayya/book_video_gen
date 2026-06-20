@@ -190,6 +190,11 @@ async def dispatch_from_prompt(
         speaker_id = f"character_{line.speaker.lower().replace(' ', '_')}_profile"
         seq_id = f"{book_id}_line_{i}"
         pcm = await _collect_tts(client, line.text, speaker_id, seq_id)
+        dur_s = len(pcm) / 2 / 44100
+        print(
+            f'[dispatch] Line {i}: {len(pcm)} bytes PCM ({dur_s:.1f}s) — "{line.text[:60]}..."',
+            flush=True,
+        )
         dialogue_pcms.append(pcm)
 
     # Generate SFX for ambient descriptions concurrently with TTS

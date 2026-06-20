@@ -181,6 +181,12 @@ async def mix_multi_dialogue(
         delays_ms.append(cumulative)
         cumulative += dur + (gap_ms if i < len(durations_ms) - 1 else 0)
 
+    print(
+        f"[multi_mixer] {n_dialogue} lines, durations={durations_ms}ms, "
+        f"delays={delays_ms}ms, total={total_duration_ms}ms, gap={gap_ms}ms",
+        flush=True,
+    )
+
     # Create pipe pairs FIRST so we know the real file descriptors
     total_inputs = n_dialogue + (1 if has_sfx else 0)
     pipes = [os.pipe() for _ in range(total_inputs)]
