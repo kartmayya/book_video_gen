@@ -85,6 +85,32 @@ async def audio_prompt_endpoint(request: AudioPromptRequest):
     Returns a streaming response with ``video/mp4`` MIME type (AAC audio only,
     no video track).
     """
+    # Pre-flight: check downstream services are reachable
+    try:
+        from .orchestrator import SFX_SERVICE_URL, TTS_SERVICE_URL
+
+        health_ok = True
+        try:
+            r = await _http_client.get(f"{TTS_SERVICE_URL}/health", timeout=3.0)
+            r.raise_for_status()
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail=f"TTS service unreachable at {TTS_SERVICE_URL}. "
+                "Start it with: make start (or ensure port 8001 is up)",
+            )
+        try:
+            r = await _http_client.get(f"{SFX_SERVICE_URL}/health", timeout=3.0)
+            r.raise_for_status()
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail=f"SFX service unreachable at {SFX_SERVICE_URL}. "
+                "Start it with: make start (or ensure port 8002 is up)",
+            )
+    except HTTPException:
+        raise
+
     dialogue_pcms, sfx_pcm, total_duration_ms = await dispatch_from_prompt(
         _http_client,
         request.audio_prompt,
