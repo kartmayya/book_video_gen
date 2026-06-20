@@ -35,12 +35,11 @@ def _extract_tone_and_clean(text: str) -> tuple[str, str | None]:
 
 
 def _pcm_offset(buffer: bytes | bytearray) -> int | None:
-    """Locate the first PCM sample in a streamed WAV body.
+    """Locate the first PCM sample after a RIFF/WAVE header.
 
-    Fish Speech streams a canonical RIFF/WAVE header (44 bytes) followed by raw
-    int16 PCM. The mixer feeds our output straight into ffmpeg as ``-f s16le``,
-    so the header must be removed. We scan for the ``data`` sub-chunk marker and
-    skip it plus its 4-byte size field; everything after that is PCM.
+    Scans for the ``data`` sub-chunk marker and skips it plus its 4-byte size
+    field; everything after that is raw PCM. Returns None until enough bytes
+    have arrived to make the determination.
     """
     idx = buffer.find(b"data")
     if idx == -1:
@@ -74,7 +73,13 @@ async def synthesize_stream(
 
     body = ormsgpack.packb(payload)
 
-    header_stripped = False
+    # In streaming mode Fish Speech's server filters its output to bytes-only
+    # chunks, and the WAV header it emits is a numpy array (not bytes), so it
+    # gets dropped: the body is pure raw s16le PCM with NO header — exactly what
+    # the mixer's `-f s16le` input wants, so we pass it straight through. We
+    # still guard against a leading RIFF header (e.g. a non-streaming server
+    # config) and strip it if present.
+    header_resolved = False
     prefix = bytearray()
     async with client.stream(
         "POST",
@@ -87,13 +92,22 @@ async def synthesize_stream(
         async for chunk in response.aiter_bytes():
             if not chunk:
                 continue
-            if header_stripped:
+            if header_resolved:
                 yield chunk
                 continue
             prefix.extend(chunk)
+            if len(prefix) < 4:
+                continue
+            if bytes(prefix[:4]) != b"RIFF":
+                # Raw PCM, no header: emit buffered bytes and pass through.
+                header_resolved = True
+                yield bytes(prefix)
+                prefix.clear()
+                continue
+            # RIFF header present: wait until the 'data' chunk, then emit PCM.
             offset = _pcm_offset(prefix)
             if offset is not None:
-                header_stripped = True
+                header_resolved = True
                 pcm = bytes(prefix[offset:])
                 prefix.clear()
                 if pcm:
