@@ -14,9 +14,17 @@ PYTHON_MIN="3.10"
 python3 -c "import sys; v=sys.version_info; exit(0 if (v.major,v.minor)>=(3,10) else 1)" \
   || { echo "ERROR: Python 3.10+ required (got $(python3 --version))"; exit 1; }
 
+# Refresh the apt cache once. Fresh containers ship with an empty package list,
+# which makes every `apt-get install` below fail to find packages (ffmpeg, venv,
+# the libav* build deps). Run this before the first install, not after.
+if command -v apt-get &>/dev/null; then
+  echo "Updating apt package lists..."
+  apt-get update -qq || echo "WARNING: 'apt-get update' failed — package installs below may not find their packages"
+fi
+
 if ! command -v ffmpeg &>/dev/null; then
   echo "Installing ffmpeg..."
-  apt-get install -y ffmpeg 2>/dev/null || { echo "ERROR: ffmpeg not found and auto-install failed. Run: apt-get install -y ffmpeg"; exit 1; }
+  apt-get install -y ffmpeg || { echo "ERROR: ffmpeg install failed. Run manually: apt-get update && apt-get install -y ffmpeg"; exit 1; }
 fi
 
 ffmpeg -version 2>&1 | head -1

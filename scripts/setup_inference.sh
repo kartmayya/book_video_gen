@@ -31,6 +31,9 @@ set -euo pipefail
 
 # ── System deps ───────────────────────────────────────────────────────────────
 echo "Installing system dependencies..."
+# Refresh the apt cache first — fresh containers have an empty package list and
+# `apt-get install` would otherwise fail to find ninja-build.
+apt-get update -qq || echo "WARNING: 'apt-get update' failed — ninja-build install may fail"
 apt-get install -y ninja-build
 
 # ── vLLM venv ────────────────────────────────────────────────────────────────
