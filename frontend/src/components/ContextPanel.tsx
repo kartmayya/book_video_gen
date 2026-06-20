@@ -48,7 +48,7 @@ export default function ContextPanel({
           disabled={composing}
           className="rounded-lg bg-amber-400 px-4 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {composing ? 'Composing...' : 'Submit'}
+          {composing ? 'Planning shots...' : 'Submit'}
         </button>
       </div>
 
@@ -77,12 +77,70 @@ export default function ContextPanel({
         ))}
       </div>
 
-      {composedScene && (
-        <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm">
+      {composedScene?.video && (
+        <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm">
           <p className="font-medium text-amber-300">
-            Scene composed -- prompt logged to the browser console.
+            {composedScene.video.shots.length} video shot
+            {composedScene.video.shots.length > 1 ? 's' : ''} planned (full payload logged to
+            the browser console).
           </p>
-          <p className="mt-1 text-slate-300">{composedScene.video_prompt}</p>
+
+          <details className="rounded border border-amber-400/20 bg-slate-900/40 p-2">
+            <summary className="cursor-pointer text-xs font-mono uppercase tracking-wide text-amber-400/80">
+              world
+            </summary>
+            <div className="mt-1 space-y-1 text-slate-300">
+              {Object.entries(composedScene.video.world.characters).map(([name, desc]) => (
+                <p key={name}>
+                  <span className="font-medium text-slate-200">{name}: </span>
+                  {desc}
+                </p>
+              ))}
+              {composedScene.video.world.location && (
+                <p>
+                  <span className="font-medium text-slate-200">location: </span>
+                  {composedScene.video.world.location}
+                </p>
+              )}
+              <p>
+                <span className="font-medium text-slate-200">look: </span>
+                {composedScene.video.world.look}
+              </p>
+            </div>
+          </details>
+
+          {composedScene.video.shots.map((shot) => (
+            <div
+              key={shot.shot_id}
+              className="rounded border border-amber-400/20 bg-slate-900/40 p-2"
+            >
+              <p className="text-xs font-mono uppercase tracking-wide text-amber-400/80">
+                {shot.shot_id}
+              </p>
+              <p className="mt-1 text-slate-400">
+                <span className="font-medium text-slate-300">camera: </span>
+                {shot.camera}
+              </p>
+              <p className="text-slate-400">
+                <span className="font-medium text-slate-300">action: </span>
+                {shot.action}
+              </p>
+              <p className="text-slate-400">
+                <span className="font-medium text-slate-300">light: </span>
+                {shot.light}
+              </p>
+              <p className="mt-1 text-slate-300">{shot.prompt}</p>
+            </div>
+          ))}
+
+          <p className="pt-1 text-slate-400">
+            <span className="font-medium text-slate-300">negative_prompt: </span>
+            {composedScene.video.negative_prompt}
+          </p>
+          <p className="text-slate-400">
+            <span className="font-medium text-slate-300">audio_prompt: </span>
+            {composedScene.audio_prompt}
+          </p>
         </div>
       )}
     </div>

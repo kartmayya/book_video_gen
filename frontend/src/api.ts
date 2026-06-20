@@ -63,6 +63,26 @@ export interface GenerationContext {
   narrative_context: string
 }
 
+export interface VideoShot {
+  shot_id: string
+  camera: string
+  action: string
+  light: string
+  prompt: string
+}
+
+export interface VideoWorld {
+  characters: Record<string, string>
+  location: string | null
+  look: string
+}
+
+export interface VideoPlan {
+  world: VideoWorld
+  shots: VideoShot[]
+  negative_prompt: string
+}
+
 export interface ComposedScene {
   book_id: number
   paragraph_ids: number[]
@@ -73,7 +93,8 @@ export interface ComposedScene {
   dialogue_script: DialogueLine[]
   sfx_prompts: string[]
   camera_framing: string
-  video_prompt: string
+  action_summary: string
+  video: VideoPlan | null
   audio_prompt: string
 }
 

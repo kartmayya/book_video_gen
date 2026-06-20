@@ -39,5 +39,25 @@ class Settings(BaseSettings):
     concurrent_requests_per_gpu: int = 4       # in-flight requests per vLLM replica
     paragraph_chunk_size: int = 8               # paragraphs grouped into one LLM call during Pass 2
 
+    # --- Video shot planning (app/video_prompting.py) ----------------------
+    # Appended verbatim to every generated shot prompt so all clips composited
+    # into one scene share a consistent look -- the same role a hand-written
+    # {STYLE} suffix plays in a manually authored SCENES list.
+    video_style_suffix: str = (
+        "Photorealistic cinematic film still, 35mm lens, dramatic volumetric lighting, "
+        "consistent color grade, highly detailed."
+    )
+    # Same idea as video_style_suffix but for what NOT to generate -- fixed and
+    # applied to every shot so failure modes (identity drift, lighting jumps
+    # between clips, AI-art artifacts) are suppressed consistently everywhere.
+    video_negative_prompt: str = (
+        "morphing, warping, melting, distortion, flickering, sudden cuts, jump cut, "
+        "teleporting, disappearing objects, extra limbs, deformed, mutated, "
+        "identity change between shots, color shift between shots, inconsistent lighting, "
+        "overexposed, static frame, text, subtitles, watermark, worst quality, low quality, "
+        "cartoon, 3d render, cgi, anime"
+    )
+    max_video_shots_per_scene: int = 4
+
 
 settings = Settings()

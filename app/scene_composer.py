@@ -1,17 +1,17 @@
 """Scene-consolidation step: merges one or more per-paragraph generation
 contexts (as resolved by app/context_compiler.py) into a single
-self-contained scene description, plus flattened text prompts for a
-downstream video model and audio (XTTS dialogue / Stable Audio SFX) model.
+self-contained scene description, plus a flattened text prompt for the
+audio (XTTS dialogue / Stable Audio SFX) model.
 
 A reader's highlighted span can cross paragraph boundaries, so this is where
 multiple `GenerationContextPayload`s -- each potentially naming overlapping
 characters/locations with slightly different deltas -- get deduplicated
 into one coherent "current state of the scene" view.
 
-This is deterministic merge logic today. It is intentionally isolated
-behind `compose_scene()` so it can be swapped for an LLM-driven consolidator
-later (e.g. to rewrite the merged action summary in natural prose) without
-touching the API layer or the callers in app/routers/books.py.
+This module produces the merged scene with `video_shots` left empty; the
+actual video-diffusion prompt(s) are LLM-planned in app/video_prompting.py,
+which decides how many shots the span needs and writes `video_shots` before
+the API layer returns the payload (see app/routers/books.py).
 """
 from __future__ import annotations
 
@@ -70,39 +70,6 @@ def _merge_sfx(payloads: list[GenerationContextPayload]) -> list[str]:
     return seen
 
 
-def _build_video_prompt(
-    characters: list[CharacterContextPayload],
-    location_name: str | None,
-    location_description: str | None,
-    location_lighting: str | None,
-    location_transitions: list[str],
-    camera_framing: str,
-    action_summary: str,
-) -> str:
-    parts: list[str] = [f"Shot type: {camera_framing.replace('_', ' ')}."]
-
-    if location_name:
-        setting = f"Setting: {location_name} -- {location_description}."
-        if location_lighting:
-            setting += f" Lighting: {location_lighting}."
-        parts.append(setting)
-    if location_transitions:
-        parts.append(f"Scene transitions through: {', '.join(location_transitions)}.")
-
-    if characters:
-        character_bits = []
-        for character in characters:
-            bit = f"{character.name} ({character.visual_description}"
-            if character.emotional_state:
-                bit += f", {character.emotional_state}"
-            bit += ")"
-            character_bits.append(bit)
-        parts.append("Characters on screen: " + "; ".join(character_bits) + ".")
-
-    parts.append(f"Action: {action_summary}")
-    return " ".join(parts)
-
-
 def _build_audio_prompt(
     characters: list[CharacterContextPayload],
     dialogue_script: list[DialogueLinePayload],
@@ -149,16 +116,9 @@ def compose_scene(payloads: list[GenerationContextPayload]) -> ComposedScenePayl
     selected_text = "\n\n".join(p.raw_text for p in payloads)
     camera_framing = payloads[-1].camera_framing
     action_summary = " Then, ".join(p.action_summary for p in payloads)
+    if location_transitions:
+        action_summary += f" The scene moves through {', '.join(location_transitions)} before this point."
 
-    video_prompt = _build_video_prompt(
-        characters=characters,
-        location_name=location.name if location else None,
-        location_description=location.visual_description if location else None,
-        location_lighting=location.lighting_state if location else None,
-        location_transitions=location_transitions,
-        camera_framing=camera_framing,
-        action_summary=action_summary,
-    )
     audio_prompt = _build_audio_prompt(
         characters=characters,
         dialogue_script=dialogue_script,
@@ -176,6 +136,7 @@ def compose_scene(payloads: list[GenerationContextPayload]) -> ComposedScenePayl
         dialogue_script=dialogue_script,
         sfx_prompts=sfx_prompts,
         camera_framing=camera_framing,
-        video_prompt=video_prompt,
+        action_summary=action_summary,
+        video=None,
         audio_prompt=audio_prompt,
     )

@@ -128,9 +128,9 @@ export default function Reader() {
       const scene = await api.composeScene(selectedParagraphIds)
       setComposedScene(scene)
       // eslint-disable-next-line no-console
-      console.log('Composed scene prompt:', scene)
+      console.log('Composed scene:', scene)
       // eslint-disable-next-line no-console
-      console.log('Video prompt:', scene.video_prompt)
+      console.log('Video shots:', scene.video_shots)
       // eslint-disable-next-line no-console
       console.log('Audio prompt:', scene.audio_prompt)
     } catch (err) {

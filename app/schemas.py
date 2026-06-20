@@ -84,10 +84,44 @@ class ComposeSceneRequest(BaseModel):
     paragraph_ids: list[int]
 
 
+class VideoWorldPayload(BaseModel):
+    """Fixed, scene-wide identity anchors -- the same role a hand-authored
+    `WORLD = {"hare": ..., "world": ..., "look": ...}` dict plays: every
+    shot's prompt splices these in verbatim, so appearance/setting/style
+    never drift between shots."""
+
+    characters: dict[str, str]
+    location: str | None
+    look: str
+
+
+class VideoShotPayload(BaseModel):
+    """One shot in the breakdown -- the camera/action/light the LLM planned
+    for it, plus `prompt`, the fully assembled text-to-video prompt (world
+    anchors + this shot's camera/action/light + style, in that order)."""
+
+    shot_id: str
+    camera: str
+    action: str
+    light: str
+    prompt: str
+
+
+class VideoPlanPayload(BaseModel):
+    """Mirrors a hand-authored `WORLD = {...}; SCENES = [...]; NEG = "..."`
+    script: fixed world anchors, an ordered shot list, and one shared
+    negative prompt applied to every shot."""
+
+    world: VideoWorldPayload
+    shots: list[VideoShotPayload]
+    negative_prompt: str
+
+
 class ComposedScenePayload(BaseModel):
     """Output of the scene-consolidation step: every paragraph the reader's
-    selection touched, merged into one self-contained scene description plus
-    a flattened text prompt ready for a video/audio generation model."""
+    selection touched, merged into one self-contained scene description,
+    plus an LLM-planned video shot breakdown and a flattened text prompt for
+    the audio (XTTS dialogue / Stable Audio SFX) model."""
 
     book_id: int
     paragraph_ids: list[int]
@@ -98,5 +132,6 @@ class ComposedScenePayload(BaseModel):
     dialogue_script: list[DialogueLinePayload]
     sfx_prompts: list[str]
     camera_framing: str
-    video_prompt: str
+    action_summary: str
+    video: VideoPlanPayload | None
     audio_prompt: str
