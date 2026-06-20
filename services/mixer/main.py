@@ -82,8 +82,7 @@ async def audio_prompt_endpoint(request: AudioPromptRequest):
     dialogue line, generates SFX for ambient sounds, sequences them with proper
     timing, and returns AAC audio in an MP4 container ready for video muxing.
 
-    Returns a streaming response with ``video/mp4`` MIME type (AAC audio only,
-    no video track).
+    Returns a streaming response with ``audio/mpeg`` MIME type (MP3).
     """
     # Pre-flight: check downstream services are reachable
     try:
@@ -123,7 +122,7 @@ async def audio_prompt_endpoint(request: AudioPromptRequest):
         ):
             yield chunk
 
-    return StreamingResponse(generate(), media_type="video/mp4")
+    return StreamingResponse(generate(), media_type="audio/mpeg")
 
 
 if __name__ == "__main__":

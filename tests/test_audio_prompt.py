@@ -193,11 +193,10 @@ class TestBuildFilterCmd:
         assert "s16le" in cmd
         assert "pipe:3" in cmd
         assert "-filter_complex" in cmd
-        # Should output AAC in MP4
-        assert "-c:a" in cmd
-        assert "aac" in cmd
+        # Should output MP3
+        assert "libmp3lame" in cmd
         assert "-f" in cmd
-        assert "mp4" in cmd
+        assert "mp3" in cmd
 
     def test_two_dialogues_with_sfx(self):
         from services.mixer.multi_mixer import _build_filter_cmd

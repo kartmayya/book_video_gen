@@ -70,18 +70,16 @@ def _build_filter_cmd(
     filter_str = ";".join(filters)
     cmd += ["-filter_complex", filter_str]
 
-    # Output: fragmented MP4 (supports pipe output) — compatible with MP4 video muxing
+    # Output: MP3 (pipe-compatible, universal playback)
     cmd += [
         "-map",
         output_label,
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "frag_keyframe+empty_moov",
+        "libmp3lame",
+        "-q:a",
+        "4",
         "-f",
-        "mp4",
+        "mp3",
         "pipe:1",
         "-loglevel",
         "error",
