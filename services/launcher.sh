@@ -35,8 +35,12 @@ CUDA_VISIBLE_DEVICES=$SFX_CUDA_DEVICE \
   "$UVICORN" services.sfx.main:app --host 0.0.0.0 --port "$SFX_PORT" &
 PID_SFX=$!
 
-TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:$TTS_PORT} \
-SFX_SERVICE_URL=${SFX_SERVICE_URL:-http://localhost:$SFX_PORT} \
+# The mixer always calls the LOCAL TTS/SFX services, so derive their URLs from
+# the ports above unconditionally. Inline assignment overrides any inherited
+# value (e.g. a stale TTS_SERVICE_URL=...:8001 left in .env from an older
+# default), which would otherwise point the mixer at the wrong port.
+TTS_SERVICE_URL=http://localhost:$TTS_PORT \
+SFX_SERVICE_URL=http://localhost:$SFX_PORT \
   "$UVICORN" services.mixer.main:app --host 0.0.0.0 --port "$MIXER_PORT" &
 PID_MIXER=$!
 
