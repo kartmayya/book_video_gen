@@ -45,7 +45,13 @@
       "Bash(npm run *)",
       "Bash(curl -sf http://localhost:5173)",
       "Bash(pkill -f \"vite\")",
-      "Bash(curl -sf http://localhost:8080/healthz)"
+      "Bash(curl -sf http://localhost:8080/healthz)",
+      "Bash(curl -s http://localhost:8080/openapi.json)",
+      "Bash(python3 -c \"import sys,json; print\\([p for p in json.load\\(sys.stdin\\)['paths'] if 'video' in p]\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST http://localhost:8080/api/generate-video-baseline -H 'Content-Type: application/json' -d '{\"prompts\":[\"test\"]}')",
+      "Bash(pkill -f \"uvicorn app.main\")",
+      "Bash(.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080)",
+      "Bash(curl -s -X POST http://localhost:8080/api/generate-video-baseline -H 'Content-Type: application/json' -d '{\"prompts\":[\"a lighthouse at dawn\"]}')"
     ]
   }
 }

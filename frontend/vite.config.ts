@@ -12,6 +12,11 @@ export default defineConfig({
     // connects to nothing.
     host: true,
     port: 5173,
+    // Accept any Host header. Vite otherwise rejects requests coming through a
+    // forwarded/tunneled domain ("Blocked request. This host is not allowed."),
+    // which shows up as a blank page in the browser even though the server is
+    // healthy. Fine for a dev box; do NOT use `true` on a public production host.
+    allowedHosts: true,
     // Proxies API calls to the FastAPI backend so the browser only ever
     // needs to reach this dev server's port. Lets frontend + backend run
     // together on a remote box (e.g. the GPU VM) with just one port
