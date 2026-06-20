@@ -92,15 +92,14 @@ def _build_filter_cmd(
     target_sec = total_duration_ms / 1000.0
 
     if has_sfx:
-        filters.append("[0:a]anull[vocal]")
-        filters.append(f"[1:a]atrim=duration={target_sec}[ambient]")
-        mix_filter = (
-            f"[vocal][ambient]amix=inputs=2:duration=first:weights=1 {SFX_WEIGHT}"
-        )
         if speed != 1.0:
-            mix_filter += f",atempo={speed}"
-        mix_filter += "[out]"
-        filters.append(mix_filter)
+            filters.append(f"[0:a]atempo={speed}[vocal]")
+        else:
+            filters.append("[0:a]anull[vocal]")
+        filters.append(f"[1:a]atrim=duration={target_sec}[ambient]")
+        filters.append(
+            f"[vocal][ambient]amix=inputs=2:duration=first:weights=1 {SFX_WEIGHT}[out]"
+        )
     else:
         out_filter = f"[0:a]atrim=duration={target_sec}"
         if speed != 1.0:
