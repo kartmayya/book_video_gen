@@ -122,6 +122,7 @@ async def audio_prompt_endpoint(request: AudioPromptRequest):
             sfx_pcm,
             total_duration_ms,
             gap_ms=request.gap_between_lines_ms,
+            speed=request.speed,
         ):
             yield chunk
 

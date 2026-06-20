@@ -19,3 +19,4 @@ class AudioPromptRequest(BaseModel):
     audio_prompt: str
     book_id: str = "audio_prompt"
     gap_between_lines_ms: int = 800
+    speed: float = 1.0  # 1.0 = normal, 1.25 = 25% faster, 0.75 = slower

@@ -59,6 +59,7 @@ def _build_filter_cmd(
     vocal_fd: int,
     sfx_fd: int | None,
     total_duration_ms: int,
+    speed: float = 1.0,
 ) -> list[str]:
     """Build ffmpeg command with at most 2 inputs: vocal + ambient."""
     cmd = ["ffmpeg", "-y"]
@@ -93,11 +94,19 @@ def _build_filter_cmd(
     if has_sfx:
         filters.append("[0:a]anull[vocal]")
         filters.append(f"[1:a]atrim=duration={target_sec}[ambient]")
-        filters.append(
-            f"[vocal][ambient]amix=inputs=2:duration=first:weights=1 {SFX_WEIGHT}[out]"
+        mix_filter = (
+            f"[vocal][ambient]amix=inputs=2:duration=first:weights=1 {SFX_WEIGHT}"
         )
+        if speed != 1.0:
+            mix_filter += f",atempo={speed}"
+        mix_filter += "[out]"
+        filters.append(mix_filter)
     else:
-        filters.append(f"[0:a]atrim=duration={target_sec}[out]")
+        out_filter = f"[0:a]atrim=duration={target_sec}"
+        if speed != 1.0:
+            out_filter += f",atempo={speed}"
+        out_filter += "[out]"
+        filters.append(out_filter)
 
     filter_str = ";".join(filters)
     cmd += ["-filter_complex", filter_str]
@@ -157,6 +166,7 @@ async def mix_multi_dialogue(
     sfx_pcm: bytes | None,
     total_duration_ms: int,
     gap_ms: int = 800,
+    speed: float = 1.0,
 ) -> AsyncIterator[bytes]:
     loop = asyncio.get_running_loop()
     has_sfx = sfx_pcm is not None and len(sfx_pcm) > 0
@@ -188,7 +198,7 @@ async def mix_multi_dialogue(
     if has_sfx:
         sfx_r, sfx_w = os.pipe()
 
-    cmd = _build_filter_cmd(vocal_r, sfx_r, total_duration_ms)
+    cmd = _build_filter_cmd(vocal_r, sfx_r, total_duration_ms, speed)
     pass_fds = [vocal_r]
     if sfx_r is not None:
         pass_fds.append(sfx_r)
