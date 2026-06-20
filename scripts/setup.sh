@@ -45,6 +45,19 @@ pip install --quiet \
   "httpx>=0.27.0" \
   "websockets>=12.0"
 
+# ── System build deps for PyAV (required by audiocraft) ─────────────────────
+echo ""
+echo "Installing system build dependencies for audiocraft..."
+apt-get install -y --quiet \
+  pkg-config \
+  libavformat-dev \
+  libavcodec-dev \
+  libavdevice-dev \
+  libavutil-dev \
+  libavfilter-dev \
+  libswscale-dev \
+  libswresample-dev
+
 # ── PyTorch + AudioCraft (SFX service) ──────────────────────────────────────
 echo ""
 echo "Installing PyTorch with CUDA 12.1 support (SFX service)..."
