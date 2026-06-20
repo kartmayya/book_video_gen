@@ -192,46 +192,55 @@ async def mux_endpoint(request: MuxRequest):
             tmp.write(chunk)
         tmp.close()
 
-    async def mux_stream():
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-y",
-            "-i",
-            request.video_path,
-            "-i",
-            audio_input,
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-map",
-            "0:v",
-            "-map",
-            "1:a",
+    # Mux with sync subprocess to temp file, then stream
+    import subprocess as sp
+
+    out_tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out_path = out_tmp.name
+    out_tmp.close()
+
+    result = sp.run(
+        [
+            "ffmpeg", "-y",
+            "-i", request.video_path,
+            "-i", audio_input,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-map", "0:v", "-map", "1:a",
             "-shortest",
-            "-f",
-            "mp4",
-            "pipe:1",
-            "-loglevel",
-            "error",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            "-f", "mp4",
+            out_path,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if cleanup_audio:
+            os.unlink(audio_input)
+        os.unlink(out_path)
+        raise HTTPException(
+            status_code=500,
+            detail=f"ffmpeg failed: {result.stderr[:300]}",
         )
-        try:
+
+    def file_stream():
+        with open(out_path, "rb") as f:
             while True:
-                chunk = await proc.stdout.read(65536)
+                chunk = f.read(65536)
                 if not chunk:
                     break
                 yield chunk
-        finally:
-            await proc.wait()
-            if cleanup_audio:
-                try:
-                    os.unlink(audio_input)
-                except OSError:
-                    pass
+        if cleanup_audio:
+            try:
+                os.unlink(audio_input)
+            except OSError:
+                pass
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
 
-    return StreamingResponse(mux_stream(), media_type="video/mp4")
+    return StreamingResponse(file_stream(), media_type="video/mp4")
 
 
 if __name__ == "__main__":
