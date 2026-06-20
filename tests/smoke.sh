@@ -90,19 +90,23 @@ SFX_RESPONSE=$(curl -sf -X POST "http://localhost:${SFX_PORT}/generate" \
     ]
   }')
 
+# Write the response to a file: the base64 audio is far larger than the OS
+# command-line arg limit, so it can't be passed as argv[1].
+echo "$SFX_RESPONSE" > /tmp/smoke_sfx.json
+
 python3 -c "
-import json, base64, sys
-data = json.loads(sys.argv[1])
+import json, base64
+data = json.load(open('/tmp/smoke_sfx.json'))
 print(f'Got {len(data[\"cues\"])} cues')
 for c in data['cues']:
     wav = base64.b64decode(c['audio_b64'])
     print(f'  t={c[\"timestamp_ms\"]}ms  duration={c[\"duration_ms\"]}ms  wav={len(wav)//1024}KB')
-" "$SFX_RESPONSE"
+"
 
 check "sfx:two_cues" \
-  python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert len(d['cues'])==2" "$SFX_RESPONSE"
+  python3 -c "import json; d=json.load(open('/tmp/smoke_sfx.json')); assert len(d['cues'])==2"
 check "sfx:has_audio_b64" \
-  python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert all(c['audio_b64'] for c in d['cues'])" "$SFX_RESPONSE"
+  python3 -c "import json; d=json.load(open('/tmp/smoke_sfx.json')); assert all(c['audio_b64'] for c in d['cues'])"
 
 # ── Mixer: full pipeline → MP3 ───────────────────────────────────────────────
 echo ""
