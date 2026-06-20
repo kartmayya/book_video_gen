@@ -70,9 +70,7 @@ def _build_filter_cmd(
 
     if has_sfx:
         filters.append("[0:a]anull[vocal]")
-        filters.append(
-            f"[1:a]aloop=loop=-1:size=2e+09,atrim=duration={target_sec}[ambient]"
-        )
+        filters.append(f"[1:a]aloop=loop=-1,atrim=duration={target_sec}[ambient]")
         filters.append(
             "[vocal][ambient]amix=inputs=2:duration=first:weights=1 0.55[out]"
         )
