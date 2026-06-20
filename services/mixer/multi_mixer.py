@@ -70,7 +70,7 @@ def _build_filter_cmd(
     filter_str = ";".join(filters)
     cmd += ["-filter_complex", filter_str]
 
-    # Output: AAC in MP4 container (compatible with MP4 video muxing)
+    # Output: fragmented MP4 (supports pipe output) — compatible with MP4 video muxing
     cmd += [
         "-map",
         output_label,
@@ -78,6 +78,8 @@ def _build_filter_cmd(
         "aac",
         "-b:a",
         "192k",
+        "-movflags",
+        "frag_keyframe+empty_moov",
         "-f",
         "mp4",
         "pipe:1",
