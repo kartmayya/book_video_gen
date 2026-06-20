@@ -33,7 +33,10 @@ async def _stream_tts(
 async def _fetch_sfx(client: httpx.AsyncClient, block: ScriptBlock) -> list[dict]:
     if not block.sfx_track:
         return []
-    payload = {"cues": [cue.model_dump() for cue in block.sfx_track]}
+    payload = {
+        "sequence_id": block.sequence_id,
+        "sfx_track": [cue.model_dump() for cue in block.sfx_track],
+    }
     resp = await client.post(f"{SFX_SERVICE_URL}/generate", json=payload)
     resp.raise_for_status()
     data = resp.json()
