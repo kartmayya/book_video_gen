@@ -52,3 +52,51 @@ class GenerationContextPayload(BaseModel):
     dialogue_script: list[DialogueLinePayload]
     sfx_prompts: list[str]
     narrative_context: str
+
+
+# ---------------------------------------------------------------------------
+# Library / reader endpoints (app/routers/books.py)
+# ---------------------------------------------------------------------------
+class BookSummaryPayload(BaseModel):
+    book_id: int
+    title: str
+    author: str | None
+    ingestion_status: str
+    paragraph_count: int
+
+
+class ParagraphPayload(BaseModel):
+    """A bare paragraph for the reader view -- text + identity only, no
+    resolved state. State is fetched on demand once the reader selects a
+    span of text and presses "query"."""
+
+    paragraph_id: int
+    sequence_index: int
+    chapter_number: int
+    raw_text: str
+
+
+class BatchContextRequest(BaseModel):
+    paragraph_ids: list[int]
+
+
+class ComposeSceneRequest(BaseModel):
+    paragraph_ids: list[int]
+
+
+class ComposedScenePayload(BaseModel):
+    """Output of the scene-consolidation step: every paragraph the reader's
+    selection touched, merged into one self-contained scene description plus
+    a flattened text prompt ready for a video/audio generation model."""
+
+    book_id: int
+    paragraph_ids: list[int]
+    sequence_index_range: tuple[int, int]
+    selected_text: str
+    characters: list[CharacterContextPayload]
+    location: LocationContextPayload | None
+    dialogue_script: list[DialogueLinePayload]
+    sfx_prompts: list[str]
+    camera_framing: str
+    video_prompt: str
+    audio_prompt: str
