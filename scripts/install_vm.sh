@@ -28,7 +28,11 @@ if ! sudo docker ps --format '{{.Names}}' | grep -q '^bvg_pg$'; then
     if sudo docker ps -a --format '{{.Names}}' | grep -q '^bvg_pg$'; then
         sudo docker start bvg_pg
     else
-        sudo docker run -d --name bvg_pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+        # Bind to localhost only -- nothing outside this box needs direct DB
+        # access (API and ingestion both run locally), and 0.0.0.0:5432 gets
+        # found and brute-forced by internet-wide scanners within minutes on
+        # a box with a public IP.
+        sudo docker run -d --name bvg_pg -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5432:5432 postgres:16
     fi
 fi
 echo "    waiting for Postgres to accept connections..."

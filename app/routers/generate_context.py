@@ -62,7 +62,9 @@ _COMPILE_QUERY = text(
                     json_build_object(
                         'character_id', c.character_id,
                         'name', c.canonical_name,
-                        'visual_description', COALESCE(cs.appearance_delta, c.baseline_visual_description),
+                        'visual_description', CASE WHEN cs.appearance_delta IS NOT NULL
+                            THEN c.baseline_visual_description || '; currently: ' || cs.appearance_delta
+                            ELSE c.baseline_visual_description END,
                         'voice_description', COALESCE(cs.vocal_delta_prompt, c.baseline_voice_description),
                         'voice_reference_audio_uri', c.voice_reference_audio_uri,
                         'emotional_state', cs.emotional_state,
@@ -90,7 +92,9 @@ _COMPILE_QUERY = text(
             SELECT json_build_object(
                 'location_id', l.location_id,
                 'name', l.canonical_name,
-                'visual_description', COALESCE(ls.atmosphere_delta, l.baseline_visual_description),
+                'visual_description', CASE WHEN ls.atmosphere_delta IS NOT NULL
+                    THEN l.baseline_visual_description || '; atmosphere: ' || ls.atmosphere_delta
+                    ELSE l.baseline_visual_description END,
                 'lighting_state', ls.lighting_state,
                 'ambient_sfx_prompt', COALESCE(ls.ambient_sfx_delta, l.baseline_ambient_sfx_prompt),
                 'profile', COALESCE(ls.profile_snapshot, l.extended_profile)
