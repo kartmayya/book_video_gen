@@ -1,9 +1,8 @@
 """Multi-dialogue audio mixer using ffmpeg.
 
-Unlike ``pipe_mixer.py`` which streams a single vocal track directly into
-ffmpeg, this module handles multiple dialogue lines with precise timing.
-It collects all TTS output first, then builds a single ffmpeg command that
-sequences dialogues with correct delays and mixes in ambient SFX.
+All dialogue lines are concatenated into a single PCM stream with silence
+gaps (avoids the amix+adelay sync problem where amix waits for all inputs).
+If ambient SFX is present, it goes to a second pipe and is mixed in.
 """
 
 from __future__ import annotations
@@ -16,84 +15,76 @@ from collections.abc import AsyncIterator
 
 TARGET_RATE = 44100
 TARGET_WIDTH = 2  # s16le = 2 bytes per sample
-GAP_BETWEEN_LINES_MS = 800  # silence between consecutive dialogue lines
+
+
+def _build_silence_pcm(duration_ms: int) -> bytes:
+    """Return silent s16le mono PCM for the given duration."""
+    num_samples = int(TARGET_RATE * duration_ms / 1000)
+    return bytes(num_samples * TARGET_WIDTH)
+
+
+def _concat_dialogues(dialogue_pcms: list[bytes], gap_ms: int) -> bytes:
+    """Concatenate dialogue PCMs with silence gaps."""
+    parts: list[bytes] = []
+    for i, pcm in enumerate(dialogue_pcms):
+        if i > 0:
+            parts.append(_build_silence_pcm(gap_ms))
+        parts.append(pcm)
+    return b"".join(parts)
 
 
 def _build_filter_cmd(
-    read_fds: list[int],
-    dialogue_pcms: list[bytes],
-    durations_ms: list[int],
-    delays_ms: list[int],
-    sfx_pcm: bytes | None,
+    vocal_fd: int,
+    sfx_fd: int | None,
     total_duration_ms: int,
 ) -> list[str]:
-    """Build the ffmpeg command with filter_complex.
-
-    ``read_fds`` are the actual OS file descriptor numbers for each
-    input pipe (must match what is passed via ``pass_fds``).
-    """
+    """Build ffmpeg command with at most 2 inputs: vocal + ambient."""
     cmd = ["ffmpeg", "-y"]
 
-    n_dialogue = len(dialogue_pcms)
-    has_sfx = sfx_pcm is not None and len(sfx_pcm) > 0
+    cmd += [
+        "-f",
+        "s16le",
+        "-ar",
+        str(TARGET_RATE),
+        "-ac",
+        "1",
+        "-i",
+        f"pipe:{vocal_fd}",
+    ]
 
-    for fd in read_fds:
-        cmd += ["-f", "s16le", "-ar", str(TARGET_RATE), "-ac", "1", "-i", f"pipe:{fd}"]
+    has_sfx = sfx_fd is not None
+    if has_sfx:
+        cmd += [
+            "-f",
+            "s16le",
+            "-ar",
+            str(TARGET_RATE),
+            "-ac",
+            "1",
+            "-i",
+            f"pipe:{sfx_fd}",
+        ]
 
     filters = []
-
-    if n_dialogue > 0:
-        # Each dialogue gets adelay, then all mixed into [vocal]
-        for i, delay_ms in enumerate(delays_ms):
-            filters.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
-
-        if n_dialogue == 1:
-            filters.append(f"[d0]acopy[vocal]")
-        else:
-            dialogue_inputs = " ".join(f"[d{i}]" for i in range(n_dialogue))
-            filters.append(
-                f"{dialogue_inputs}amix=inputs={n_dialogue}:duration=longest"
-                f":dropout_transition=0[vocal]"
-            )
+    target_sec = total_duration_ms / 1000.0
 
     if has_sfx:
-        sfx_idx = n_dialogue
-        target_sec = total_duration_ms / 1000.0
+        filters.append("[0:a]anull[vocal]")
         filters.append(
-            f"[{sfx_idx}:a]aloop=loop=-1:size=2e+09,"
-            f"atrim=duration={target_sec}[ambient]"
+            f"[1:a]aloop=loop=-1:size=2e+09,atrim=duration={target_sec}[ambient]"
         )
-
-    # Combine vocal + ambient, or use whichever is present
-    if n_dialogue > 0 and has_sfx:
         filters.append(
             "[vocal][ambient]amix=inputs=2:duration=first:weights=1 0.55[out]"
         )
-        output_label = "[out]"
-    elif n_dialogue > 0:
-        target_sec = total_duration_ms / 1000.0
-        filters.append(f"[vocal]atrim=duration={target_sec}[out]")
-        output_label = "[out]"
-    elif has_sfx:
-        target_sec = total_duration_ms / 1000.0
-        filters.append(f"[ambient]atrim=duration={target_sec}[out]")
-        output_label = "[out]"
     else:
-        # No audio at all — generate silence
-        target_sec = total_duration_ms / 1000.0
-        total_samples = int(TARGET_RATE * target_sec)
-        filters.append(
-            f"aevalsrc=0:duration={target_sec}:sample_rate={TARGET_RATE}[out]"
-        )
-        output_label = "[out]"
+        filters.append(f"[0:a]atrim=duration={target_sec}[out]")
 
     filter_str = ";".join(filters)
     cmd += ["-filter_complex", filter_str]
 
-    # Output: MP3 (pipe-compatible, universal playback)
     cmd += [
         "-map",
-        output_label,
+        "[out]",
         "-c:a",
         "libmp3lame",
         "-q:a",
@@ -110,7 +101,6 @@ def _build_filter_cmd(
 async def _write_all_to_fd(
     fd: int, data: bytes, loop: asyncio.AbstractEventLoop
 ) -> None:
-    """Write all bytes to a file descriptor, handling partial writes."""
     view = memoryview(data)
     offset = 0
     while offset < len(view):
@@ -123,7 +113,6 @@ def _read_ffmpeg_output(
     queue: asyncio.Queue,
     loop: asyncio.AbstractEventLoop,
 ) -> None:
-    """Read ffmpeg stdout into a queue (runs in executor thread)."""
     try:
         while True:
             chunk = proc.stdout.read(4096)
@@ -135,7 +124,6 @@ def _read_ffmpeg_output(
 
 
 def _read_ffmpeg_stderr(proc: subprocess.Popen, sink: list[bytes]) -> None:
-    """Read ffmpeg stderr for error reporting."""
     try:
         data = proc.stderr.read()
         if data:
@@ -150,58 +138,31 @@ async def mix_multi_dialogue(
     total_duration_ms: int,
     gap_ms: int = 800,
 ) -> AsyncIterator[bytes]:
-    """Mix multiple dialogue lines with ambient SFX and stream the result.
-
-    Parameters
-    ----------
-    dialogue_pcms:
-        Raw s16le PCM for each dialogue line, in order.
-    sfx_pcm:
-        Raw s16le PCM for ambient SFX (may be None).
-    total_duration_ms:
-        Total desired output duration in milliseconds.
-
-    Yields
-    ------
-    Chunks of AAC-encoded audio in an MP4 container.
-    """
     loop = asyncio.get_running_loop()
-    n_dialogue = len(dialogue_pcms)
     has_sfx = sfx_pcm is not None and len(sfx_pcm) > 0
+    n_dialogue = len(dialogue_pcms)
 
-    # Calculate per-line durations and delays
-    durations_ms = []
-    for pcm in dialogue_pcms:
-        num_samples = len(pcm) // TARGET_WIDTH
-        durations_ms.append(int(num_samples / TARGET_RATE * 1000))
-
-    delays_ms = []
-    cumulative = 0
-    for i, dur in enumerate(durations_ms):
-        delays_ms.append(cumulative)
-        cumulative += dur + (gap_ms if i < len(durations_ms) - 1 else 0)
-
+    # Combine all dialogues + silence gaps into one contiguous PCM buffer
+    combined_vocal = _concat_dialogues(dialogue_pcms, gap_ms)
+    vocal_samples = len(combined_vocal) // TARGET_WIDTH
+    vocal_dur_ms = int(vocal_samples / TARGET_RATE * 1000)
     print(
-        f"[multi_mixer] {n_dialogue} lines, durations={durations_ms}ms, "
-        f"delays={delays_ms}ms, total={total_duration_ms}ms, gap={gap_ms}ms",
+        f"[multi_mixer] {n_dialogue} lines -> combined {len(combined_vocal)} bytes"
+        f" ({vocal_dur_ms}ms), total={total_duration_ms}ms, gap={gap_ms}ms, sfx={has_sfx}",
         flush=True,
     )
 
-    # Create pipe pairs FIRST so we know the real file descriptors
-    total_inputs = n_dialogue + (1 if has_sfx else 0)
-    pipes = [os.pipe() for _ in range(total_inputs)]
-    read_fds = [r for r, w in pipes]
+    # One pipe for vocal, optionally one for SFX
+    vocal_r, vocal_w = os.pipe()
+    sfx_r, sfx_w = (None, None)
+    if has_sfx:
+        sfx_r, sfx_w = os.pipe()
 
-    cmd = _build_filter_cmd(
-        read_fds,
-        dialogue_pcms,
-        durations_ms,
-        delays_ms,
-        sfx_pcm,
-        total_duration_ms,
-    )
+    cmd = _build_filter_cmd(vocal_r, sfx_r, total_duration_ms)
+    pass_fds = [vocal_r]
+    if sfx_r is not None:
+        pass_fds.append(sfx_r)
 
-    pass_fds = list(read_fds)  # copy before we close them below
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -210,32 +171,28 @@ async def mix_multi_dialogue(
         close_fds=True,
     )
 
-    # Close read ends in parent (ffmpeg owns them)
-    for r, w in pipes:
-        os.close(r)
+    os.close(vocal_r)
+    if sfx_r is not None:
+        os.close(sfx_r)
 
-    # Start writing PCM to pipe write ends
-    writers = []
-    for i, pcm in enumerate(dialogue_pcms):
-        w_fd = pipes[i][1]
-        writers.append(asyncio.create_task(_write_all_to_fd(w_fd, pcm, loop)))
+    writers = [asyncio.create_task(_write_all_to_fd(vocal_w, combined_vocal, loop))]
+    if has_sfx and sfx_w is not None:
+        writers.append(asyncio.create_task(_write_all_to_fd(sfx_w, sfx_pcm, loop)))
 
-    if has_sfx:
-        w_fd = pipes[n_dialogue][1]
-        writers.append(asyncio.create_task(_write_all_to_fd(w_fd, sfx_pcm, loop)))
-
-    # Close write ends after all data is written
     async def _close_pipes():
         await asyncio.gather(*writers)
-        for _, w in pipes:
+        try:
+            os.close(vocal_w)
+        except OSError:
+            pass
+        if sfx_w is not None:
             try:
-                os.close(w)
+                os.close(sfx_w)
             except OSError:
                 pass
 
     close_task = asyncio.create_task(_close_pipes())
 
-    # Read ffmpeg output
     out_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
     reader_future = loop.run_in_executor(
         None, _read_ffmpeg_output, proc, out_queue, loop
