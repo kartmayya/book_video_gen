@@ -20,32 +20,28 @@ echo "==> Installing OS packages"
 # a "Python.h: No such file or directory" buried deep in the engine-core
 # traceback. Install it up front. Package name varies by Python version
 # (python3.10-dev on 22.04, python3-dev tracks default python3 on 24.04+).
-sudo apt-get update -qq
-sudo apt-get install -y -qq python3-dev python3-venv docker.io postgresql-client
+apt-get update -qq
+apt-get install -y -qq python3-dev python3-venv postgresql postgresql-client
 
-echo "==> Starting Postgres (Docker)"
-if ! sudo docker ps --format '{{.Names}}' | grep -q '^bvg_pg$'; then
-    if sudo docker ps -a --format '{{.Names}}' | grep -q '^bvg_pg$'; then
-        sudo docker start bvg_pg
-    else
-        # Bind to localhost only -- nothing outside this box needs direct DB
-        # access (API and ingestion both run locally), and 0.0.0.0:5432 gets
-        # found and brute-forced by internet-wide scanners within minutes on
-        # a box with a public IP.
-        sudo docker run -d --name bvg_pg -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5432:5432 postgres:16
-    fi
+echo "==> Starting Postgres (native)"
+# Start the cluster if it isn't already running.
+if ! pg_isready -q 2>/dev/null; then
+    pg_ctlcluster 14 main start || service postgresql start
+    until pg_isready -q; do sleep 1; done
 fi
-echo "    waiting for Postgres to accept connections..."
-until sudo docker exec bvg_pg pg_isready -U postgres >/dev/null 2>&1; do
-    sleep 1
-done
-sudo docker exec -i bvg_pg psql -U postgres -d postgres < db/schema.sql
+
+# Set the postgres user password so asyncpg can authenticate over TCP.
+su -c "psql -c \"ALTER USER postgres PASSWORD 'postgres';\"" postgres
+
+# Create the app database if it doesn't exist, then apply the schema.
+su -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname='book_video_gen'\" | grep -q 1 || createdb book_video_gen" postgres
+su -c "psql -d book_video_gen" postgres < db/schema.sql
 
 echo "==> Writing .env (only if missing -- won't clobber an existing config)"
 if [ ! -f .env ]; then
     cat > .env <<'EOF'
-BVG_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
-BVG_VLLM_MODEL_NAME=meta-llama/Meta-Llama-3-70B-Instruct
+BVG_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/book_video_gen
+BVG_VLLM_MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
 EOF
 fi
 
@@ -59,4 +55,4 @@ pip install -q -r requirements.txt
 pip install -q vllm
 
 echo "==> Done."
-echo "Next: export BVG_VLLM_MODEL_NAME=<model>, then ./scripts/launch_vllm_cluster.sh"
+echo "Next: huggingface-cli download Qwen/Qwen2.5-72B-Instruct, then GPU_DEVICES=4,5,6,7 ./scripts/launch_vllm_cluster.sh"

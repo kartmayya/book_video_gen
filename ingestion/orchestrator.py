@@ -28,7 +28,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 from dataclasses import dataclass, field
+
+from tqdm import tqdm
 
 from app.db import db_session_scope
 from app.config import settings
@@ -194,7 +197,7 @@ async def _extract_registry_chunk(
             system_prompt=REGISTRY_SYSTEM_PROMPT,
             user_prompt=chunk_text,
             response_schema=RegistryExtractionResult,
-            max_tokens=2048,
+            max_tokens=8192,
         )
     except LLMExtractionError:
         logger.exception("Pass 1 registry extraction failed for a chunk; skipping it")
@@ -211,7 +214,15 @@ async def run_pass_1_registry(
     paragraph_chunks = _chunked(paragraphs, size=40)
     chunk_texts = ["\n\n".join(p.raw_text for p in chunk) for chunk in paragraph_chunks]
 
-    results = await asyncio.gather(*(_extract_registry_chunk(pool, text) for text in chunk_texts))
+    bar = tqdm(total=len(chunk_texts), desc="Pass 1 registry", unit="chunk", file=sys.stderr)
+
+    async def _tracked_registry_chunk(text: str) -> RegistryExtractionResult:
+        result = await _extract_registry_chunk(pool, text)
+        bar.update(1)
+        return result
+
+    results = await asyncio.gather(*(_tracked_registry_chunk(text) for text in chunk_texts))
+    bar.close()
 
     merged_characters: dict[str, Character] = {}
     merged_locations: dict[str, Location] = {}
@@ -299,7 +310,7 @@ async def _extract_beats_chunk(
             system_prompt=system_prompt,
             user_prompt=_format_paragraph_batch_prompt(batch),
             response_schema=ParagraphBatchExtractionResult,
-            max_tokens=4096,
+            max_tokens=8192,
         )
         return result.beats
     except LLMExtractionError:
@@ -318,11 +329,18 @@ async def _generate_all_beats(
         characters="; ".join(registry.character_summaries) or "none",
         locations="; ".join(registry.location_summaries) or "none",
     )
-    batches = _chunked(paragraphs, size=settings.paragraph_chunk_size)
+    batches = list(_chunked(paragraphs, size=settings.paragraph_chunk_size))
+    bar = tqdm(total=len(batches), desc="Pass 2 beats  ", unit="batch", file=sys.stderr)
+
+    async def _tracked_beats_chunk(batch: list[SegmentedParagraph]) -> list[ParagraphBeat]:
+        result = await _extract_beats_chunk(pool, batch, system_prompt)
+        bar.update(1)
+        return result
 
     # This is the data-parallel fan-out: every batch is an independent
-    # coroutine, scheduled round-robin across all 8 GPU replicas by GpuWorkerPool.
-    results = await asyncio.gather(*(_extract_beats_chunk(pool, batch, system_prompt) for batch in batches))
+    # coroutine, scheduled round-robin across all GPU replicas by GpuWorkerPool.
+    results = await asyncio.gather(*(_tracked_beats_chunk(batch) for batch in batches))
+    bar.close()
 
     all_beats = [beat for batch_result in results for beat in batch_result]
     all_beats.sort(key=lambda b: b.sequence_index)

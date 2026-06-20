@@ -22,23 +22,20 @@ class Settings(BaseSettings):
     # Each entry is the base URL of an independent vLLM server instance.
     # Running one replica per GPU (rather than a single tensor-parallel
     # server) is what gives us *data* parallelism across paragraphs/chunks.
+    # Two replicas: 4 GPUs reserved for Wan (0-3), 4 for LLM (4-7) at TP=2.
+    # Override at runtime via BVG_VLLM_ENDPOINTS or by running launch_vllm_cluster.sh
+    # (which writes the actual endpoints to .env).
     vllm_endpoints: list[str] = [
-        "http://gpu-0:8000/v1",
-        "http://gpu-1:8000/v1",
-        "http://gpu-2:8000/v1",
-        "http://gpu-3:8000/v1",
-        "http://gpu-4:8000/v1",
-        "http://gpu-5:8000/v1",
-        "http://gpu-6:8000/v1",
-        "http://gpu-7:8000/v1",
+        "http://localhost:8000/v1",
+        "http://localhost:8001/v1",
     ]
-    vllm_model_name: str = "meta-llama/Meta-Llama-3-70B-Instruct"
-    vllm_request_timeout_s: float = 120.0
+    vllm_model_name: str = "Qwen/Qwen2.5-32B-Instruct"
+    vllm_request_timeout_s: float = 300.0
     vllm_max_retries: int = 3
 
     # --- Ingestion tuning -------------------------------------------------
     concurrent_requests_per_gpu: int = 4       # in-flight requests per vLLM replica
-    paragraph_chunk_size: int = 8               # paragraphs grouped into one LLM call during Pass 2
+    paragraph_chunk_size: int = 4               # paragraphs grouped into one LLM call during Pass 2
 
     # --- Video shot planning (app/video_prompting.py) ----------------------
     # Appended verbatim to every generated shot prompt so all clips composited

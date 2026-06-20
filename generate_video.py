@@ -1,6 +1,8 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"   # single GPU
 
+import argparse
+import json
 import subprocess
 import numpy as np
 import torch
@@ -24,96 +26,21 @@ SEED        = 42      # FIXED across all scenes -> nudges the latent space towar
                       # the same "look" each clip, which helps cross-clip consistency.
 
 # ===========================================================================
-# THE WORLD BIBLE  (single source of truth — the persistent context)
-# ---------------------------------------------------------------------------
-# This is the whole trick for continuity in pure text-to-video. Each clip is
-# generated independently, so the ONLY thing that keeps the hare, the tortoise,
-# the forest and the color grade looking identical across all four shots is
-# using the *exact same wording* every time. So we never hand-write character
-# or setting descriptions inside a scene — we pull them verbatim from here.
-#
-# Edit a fact once here -> it changes consistently in all four clips.
-# The descriptions are deliberately loaded with distinctive, repeatable details
-# (white chest blaze, torn left ear, mossy cracked shell) so the model latches
-# onto the SAME individual animal each time instead of a generic one.
+# LOAD PLAN FROM UI
+# Pass the JSON saved from POST /api/compose-scene
 # ===========================================================================
-WORLD = {
-    "walton": (
-        "the same individual Robert Walton in every shot — a determined, ambitious explorer "
-        "in his late twenties, dressed in heavy fur clothing for harsh northern climates, "
-        "rugged and weathered from travel, with a thoughtful, somewhat melancholic expression"
-    ),
-    "stranger": (
-        "the same individual gaunt stranger in every shot — a man with a hollow, emaciated "
-        "face, wearing tattered ragged clothing, showing severe physical and emotional distress"
-    ),
-    "location": (
-        "the same vast icy Arctic expanse of white, the deck and rail of a wooden sailing "
-        "ship locked in ice, with occasional breaks in the ice revealing dark waters beneath"
-    ),
-    "look": (
-        "photorealistic cinematic film still, 35mm lens, dramatic volumetric lighting, "
-        "consistent color grade, highly detailed, film-like, steady continuous footage"
-    ),
-}
+parser = argparse.ArgumentParser()
+parser.add_argument("plan", help="Path to the VideoPlanPayload JSON from the UI.")
+cli = parser.parse_args()
 
-# Fixed template. Order matters in T2V: identity tokens go early, style anchors
-# at the end, and the same connective phrasing is reused for every scene so the
-# prompts differ ONLY by the action, camera and light — nothing else drifts.
-def build_prompt(camera, action, light):
-    return (
-        f"{camera} Part of one continuous cinematic sequence. "
-        f"{action} "
-        f"The explorer is {WORLD['walton']}. The rescued man is {WORLD['stranger']}. "
-        f"Setting: {WORLD['location']}. {light} {WORLD['look']}."
-    )
+with open(cli.plan) as f:
+    data = json.load(f)
 
-# Lighting deliberately walks dawn -> morning -> midday -> sunset so the day
-# progresses naturally, but the GRADE (WORLD['look']) stays identical, so it
-# reads as one continuous piece rather than four disconnected clips.
-SCENES = [
-    ("01_the_question",
-        build_prompt(
-            camera="Medium shot from the deck rail, slight low angle, the camera holding steady.",
-            action=(
-                "The gaunt man down on the ice calls up across the gap, lifting his head to "
-                "address the explorer at the rail, who leans forward in astonishment to answer him."
-            ),
-            light="Flat pale Arctic daylight.",
-        ),
-    ),
-    ("02_coming_aboard",
-        build_prompt(
-            camera="Medium tracking shot following the figure as crew hands haul him over the rail onto the deck.",
-            action=(
-                "Crew members grip the frail man under the arms and pull him aboard; his legs "
-                "buckle and he collapses, fainting against the deck planks."
-            ),
-            light="Cold overcast daylight.",
-        ),
-    ),
-    ("03_the_revival",
-        build_prompt(
-            camera="Medium shot slowly pushing in, the crew gathered around the prone figure.",
-            action=(
-                "Kneeling crew rub the man's limbs and tip brandy to his lips; he stirs, is "
-                "wrapped in blankets near the stove, and weakly sips a little soup as the "
-                "explorer watches over him."
-            ),
-            light="Dim daylight warmed by the orange glow of the cabin stove.",
-        ),
-    ),
-]
-
-# Negative prompt is also part of the persistent context: the same "never do
-# this" list applied to every clip keeps failure modes (bipedal stance, morphing,
-# style/color jumps between shots) consistent and suppressed everywhere.
-NEG = (
-    "morphing, warping, melting, distortion, flickering, sudden cuts, jump cut, teleporting, "
-    "disappearing objects, extra limbs, deformed, mutated, identity change between shots, "
-    "color shift between shots, inconsistent lighting, overexposed, static frame, text, "
-    "subtitles, watermark, worst quality, low quality, cartoon, 3d render, cgi, anime"
-)
+# Accept either a raw VideoPlanPayload or the full ComposedScenePayload (video key)
+video_plan = data.get("video") or data
+SCENES = [(s["shot_id"], s["prompt"]) for s in video_plan["shots"]]
+NEG    = video_plan["negative_prompt"]
+print(f"Loaded {len(SCENES)} shot(s) from {cli.plan}")
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 

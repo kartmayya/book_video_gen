@@ -111,6 +111,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+export interface GenerateVideoResponse {
+  job_id: string
+  scene: ComposedScene
+}
+
 export const api = {
   listBooks: () => request<BookSummary[]>('/api/books'),
 
@@ -125,6 +130,12 @@ export const api = {
 
   composeScene: (paragraphIds: number[]) =>
     request<ComposedScene>('/api/compose-scene', {
+      method: 'POST',
+      body: JSON.stringify({ paragraph_ids: paragraphIds }),
+    }),
+
+  generateVideo: (paragraphIds: number[]) =>
+    request<GenerateVideoResponse>('/api/generate-video', {
       method: 'POST',
       body: JSON.stringify({ paragraph_ids: paragraphIds }),
     }),

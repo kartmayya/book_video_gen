@@ -6,6 +6,11 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // Bind to 0.0.0.0, not just loopback, so a forwarded/tunneled 5173
+    // (e.g. from a remote GPU VM or container) can actually reach the dev
+    // server. Without this Vite listens on 127.0.0.1 only and the forwarder
+    // connects to nothing.
+    host: true,
     port: 5173,
     // Proxies API calls to the FastAPI backend so the browser only ever
     // needs to reach this dev server's port. Lets frontend + backend run

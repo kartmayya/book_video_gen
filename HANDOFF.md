@@ -97,7 +97,7 @@ source .venv/bin/activate
 # GPUs (only needed for real ingestion, skip if just testing API/schema).
 # Model name must be `export`ed -- the launch script reads the shell env,
 # NOT .env (.env is only read by the Python app via pydantic-settings).
-export BVG_VLLM_MODEL_NAME=meta-llama/Meta-Llama-3-70B-Instruct
+export BVG_VLLM_MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
 ./scripts/launch_vllm_cluster.sh
 
 # Ingest a book (data/texts/ has public-domain samples for smoke testing)

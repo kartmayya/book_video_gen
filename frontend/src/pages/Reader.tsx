@@ -24,6 +24,10 @@ export default function Reader() {
 
   const [composedScene, setComposedScene] = useState<ComposedScene | null>(null)
   const [composing, setComposing] = useState(false)
+  // Fire-and-forget: the backend renders the video in the background and saves
+  // it to disk (generated_videos/video_<timestamp>.mp4). The UI just records
+  // that it was kicked off -- no polling.
+  const [videoSubmitted, setVideoSubmitted] = useState(false)
 
   const [pageIndex, setPageIndex] = useState(0)
 
@@ -58,6 +62,7 @@ export default function Reader() {
     setContexts([])
     setQueryError(null)
     setComposedScene(null)
+    setVideoSubmitted(false)
   }, [])
 
   const goToPage = useCallback(
@@ -124,15 +129,12 @@ export default function Reader() {
   const handleCompose = useCallback(async () => {
     if (selectedParagraphIds.length === 0) return
     setComposing(true)
+    setVideoSubmitted(false)
     try {
-      const scene = await api.composeScene(selectedParagraphIds)
+      const { scene } = await api.generateVideo(selectedParagraphIds)
       setComposedScene(scene)
-      // eslint-disable-next-line no-console
-      console.log('Composed scene:', scene)
-      // eslint-disable-next-line no-console
-      console.log('Video shots:', scene.video_shots)
-      // eslint-disable-next-line no-console
-      console.log('Audio prompt:', scene.audio_prompt)
+      // Request accepted; rendering happens server-side and is saved to disk.
+      setVideoSubmitted(true)
     } catch (err) {
       setQueryError(String(err))
     } finally {
@@ -229,6 +231,7 @@ export default function Reader() {
             error={queryError}
             onCompose={handleCompose}
             composing={composing}
+            videoSubmitted={videoSubmitted}
           />
         </div>
       </div>

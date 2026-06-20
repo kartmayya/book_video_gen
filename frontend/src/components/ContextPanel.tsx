@@ -7,6 +7,7 @@ interface ContextPanelProps {
   error: string | null
   onCompose: () => void
   composing: boolean
+  videoSubmitted: boolean
 }
 
 export default function ContextPanel({
@@ -16,6 +17,7 @@ export default function ContextPanel({
   error,
   onCompose,
   composing,
+  videoSubmitted,
 }: ContextPanelProps) {
   if (loading) {
     return <p className="text-sm text-slate-400">Querying state for the selected text...</p>
@@ -48,7 +50,7 @@ export default function ContextPanel({
           disabled={composing}
           className="rounded-lg bg-amber-400 px-4 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {composing ? 'Planning shots...' : 'Submit'}
+          {composing ? 'Planning shots...' : 'Generate Video'}
         </button>
       </div>
 
@@ -157,6 +159,19 @@ export default function ContextPanel({
           <p className="text-slate-400">
             <span className="font-medium text-slate-300">audio_prompt: </span>
             {composedScene.audio_prompt}
+          </p>
+        </div>
+      )}
+
+      {videoSubmitted && (
+        <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm">
+          <p className="font-medium text-emerald-300">
+            Video generation started.
+          </p>
+          <p className="mt-1 text-slate-400">
+            Rendering runs on the server (~40 min) and the finished clip is saved to{' '}
+            <span className="font-mono text-slate-300">generated_videos/video_&lt;timestamp&gt;.mp4</span>.
+            You can close this — no need to wait here.
           </p>
         </div>
       )}
