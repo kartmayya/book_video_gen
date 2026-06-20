@@ -149,6 +149,18 @@ If `install_vm.sh` already ran on this box, you can skip straight to
    instead of `"wide_shot"`, and Postgres's `CHECK` constraint on
    `paragraphs.camera_framing` rejected the insert. Fixed by making it a
    real `Literal[VALID_CAMERA_FRAMINGS]`.
+3. **`ingestion/orchestrator.py`: duplicate state changes for the same
+   entity within one beat crashed the carry-forward writer.** When the LLM
+   emitted two `character_state_changes` (or `location_state_changes`)
+   entries naming the same character/location in a single paragraph beat,
+   the second loop iteration closed the ledger row the first iteration had
+   just opened *at the same `paragraph_id`* -- producing
+   `valid_from_paragraph_id == valid_until_paragraph_id` and violating
+   `chk_character_state_range`/`chk_location_state_range`. Hit this for
+   real ingesting "The Tell-Tale Heart" (`location_states`, paragraph 9).
+   Fixed by merging same-paragraph changes for the same entity (last
+   non-null field wins) into a single ledger row before applying
+   carry-forward, in both loops.
 
 ## What has NOT been tested
 

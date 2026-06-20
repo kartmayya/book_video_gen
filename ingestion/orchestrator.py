@@ -43,6 +43,8 @@ from app.models import (
 )
 from ingestion.llm_client import GpuWorkerPool, LLMExtractionError
 from ingestion.schemas import (
+    CharacterStateChange,
+    LocationStateChange,
     ParagraphBatchExtractionResult,
     ParagraphBeat,
     RegistryExtractionResult,
@@ -346,7 +348,26 @@ async def _apply_beats_sequentially(
                     continue
                 session.add(ParagraphCharacter(paragraph_id=paragraph.paragraph_id, character_id=character_id))
 
+            # The LLM occasionally emits more than one state-change entry for
+            # the same character within a single beat. Treat those as one
+            # logical change (last non-null field wins) -- applying them as
+            # separate ledger rows would make the second row close the
+            # first one's range at the same paragraph_id it opened on,
+            # violating chk_character_state_range (valid_from == valid_until).
+            merged_character_changes: dict[str, CharacterStateChange] = {}
             for change in beat.character_state_changes:
+                existing = merged_character_changes.get(change.character_name)
+                if existing is None:
+                    merged_character_changes[change.character_name] = change
+                else:
+                    merged_character_changes[change.character_name] = CharacterStateChange(
+                        character_name=change.character_name,
+                        appearance_delta=change.appearance_delta or existing.appearance_delta,
+                        emotional_state=change.emotional_state or existing.emotional_state,
+                        vocal_delta_prompt=change.vocal_delta_prompt or existing.vocal_delta_prompt,
+                    )
+
+            for change in merged_character_changes.values():
                 character_id = registry.resolve_character(change.character_name)
                 if character_id is None:
                     logger.warning(
@@ -373,7 +394,21 @@ async def _apply_beats_sequentially(
                 session.add(new_state)
                 character_latest_state[character_id] = new_state
 
+            # Same dedup as character_state_changes above, for the same reason.
+            merged_location_changes: dict[str, LocationStateChange] = {}
             for change in beat.location_state_changes:
+                existing = merged_location_changes.get(change.location_name)
+                if existing is None:
+                    merged_location_changes[change.location_name] = change
+                else:
+                    merged_location_changes[change.location_name] = LocationStateChange(
+                        location_name=change.location_name,
+                        atmosphere_delta=change.atmosphere_delta or existing.atmosphere_delta,
+                        lighting_state=change.lighting_state or existing.lighting_state,
+                        ambient_sfx_delta=change.ambient_sfx_delta or existing.ambient_sfx_delta,
+                    )
+
+            for change in merged_location_changes.values():
                 location_id = registry.resolve_location(change.location_name)
                 if location_id is None:
                     logger.warning(
