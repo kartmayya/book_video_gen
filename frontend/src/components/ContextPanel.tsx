@@ -149,6 +149,10 @@ export default function ContextPanel({
                 {shot.light}
               </p>
               <p className="mt-1 text-slate-300">{shot.prompt}</p>
+              <p className="mt-1 text-sky-300">
+                <span className="font-medium text-sky-200">audio: </span>
+                {shot.audio_prompt}
+              </p>
             </div>
           ))}
 

@@ -70,6 +70,7 @@ export interface VideoShot {
   light: string
   continuity: 'continuous_frame' | 'cut_same_scene' | 'cut_new_scene'
   prompt: string
+  audio_prompt: string
 }
 
 export interface VideoWorld {

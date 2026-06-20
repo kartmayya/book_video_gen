@@ -39,7 +39,14 @@ import anthropic
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
-from app.schemas import ComposedScenePayload, VideoPlanPayload, VideoShotPayload, VideoWorldPayload
+from app.schemas import (
+    CharacterContextPayload,
+    ComposedScenePayload,
+    DialogueLinePayload,
+    VideoPlanPayload,
+    VideoShotPayload,
+    VideoWorldPayload,
+)
 
 logger = logging.getLogger("app.video_prompting")
 
@@ -87,6 +94,11 @@ real scene boundaries, not for ordinary cuts within one conversation or \
 one continuous action.
   The first shot in the sequence has no previous clip to relate to, so it \
 is always "cut_new_scene".
+- dialogue_line_indices: the indices of the numbered dialogue lines (listed \
+in the scene description) that are SPOKEN during THIS shot. Assign each \
+dialogue line to exactly one shot, in reading order, placing it in the shot \
+whose action it accompanies. Use an empty list for a shot with no spoken \
+dialogue. Do not invent lines or indices that are not in the list.
 
 Never mention paragraph numbers, character IDs, or any other database \
 bookkeeping. Give each shot a short slug id like "01_the_chase" that \
@@ -108,6 +120,14 @@ class ShotCandidate(BaseModel):
             "within the same ongoing scene (e.g. shot/reverse-shot dialogue); "
             "'cut_new_scene' for an actual scene break (location/time change) -- "
             "always 'cut_new_scene' for the first shot, since there is no previous clip"
+        ),
+    )
+    dialogue_line_indices: list[int] = Field(
+        default_factory=list,
+        description=(
+            "0-based indices into the numbered dialogue list from the scene that are "
+            "spoken during this shot. Each dialogue line belongs to exactly one shot; "
+            "empty list if no dialogue is spoken in this shot."
         ),
     )
 
@@ -134,6 +154,12 @@ def _format_scene_for_llm(scene: ComposedScenePayload) -> str:
     if scene.dialogue_script:
         speaking = ", ".join(sorted({line.character_name for line in scene.dialogue_script}))
         lines.append(f"Characters speaking on screen during this span: {speaking}.")
+        lines.append(
+            "Numbered dialogue lines (assign each to the shot it is spoken in, "
+            "via that shot's dialogue_line_indices):"
+        )
+        for i, line in enumerate(scene.dialogue_script):
+            lines.append(f"  [{i}] {line.character_name}: \"{line.line}\"")
 
     lines.append(f"Camera framing established by the text: {scene.camera_framing.replace('_', ' ')}")
     lines.append(f"Action across this span: {scene.action_summary}")
@@ -221,20 +247,73 @@ async def _request_shot_breakdown(user_prompt: str) -> ShotBreakdown:
     raise VideoPlanningError(f"Exhausted {_MAX_RETRIES} attempts against the Claude API") from last_error
 
 
+def _build_shot_audio_prompt(
+    characters: list[CharacterContextPayload],
+    dialogue_lines: list[DialogueLinePayload],
+    ambient_sfx_prompt: str | None,
+) -> str:
+    """Per-shot audio prompt: the ambient bed (shared by every clip in the
+    scene) plus only the dialogue spoken in THIS shot -- so it's clear what
+    is voiced over each clip, rather than one lump prompt for the whole span.
+    Mirrors the formatting of scene_composer._build_audio_prompt."""
+    parts: list[str] = []
+    if ambient_sfx_prompt:
+        parts.append(f"Ambient bed: {ambient_sfx_prompt}.")
+    if dialogue_lines:
+        voice_by_name = {c.name: c.voice_description for c in characters}
+        dialogue_bits = []
+        for line in dialogue_lines:
+            voice = voice_by_name.get(line.character_name, "")
+            voice_note = f" [voice: {voice}]" if voice else ""
+            dialogue_bits.append(
+                f'{line.character_name} ({line.emotion}, {line.delivery}){voice_note}: "{line.line}"'
+            )
+        parts.append("Dialogue: " + " | ".join(dialogue_bits))
+    return " ".join(parts) if parts else "No spoken dialogue in this shot."
+
+
+def _assign_dialogue_to_shots(
+    shots: list[ShotCandidate], dialogue_count: int
+) -> list[list[int]]:
+    """Resolve each shot's dialogue_line_indices to valid, de-duplicated index
+    lists. Any line the model failed to assign to a shot is appended to the
+    last shot so no dialogue is silently dropped; out-of-range/duplicate
+    indices are discarded."""
+    assigned: set[int] = set()
+    per_shot: list[list[int]] = []
+    for shot in shots:
+        valid: list[int] = []
+        for i in shot.dialogue_line_indices:
+            if 0 <= i < dialogue_count and i not in assigned:
+                assigned.add(i)        # mark immediately so within-list dupes drop too
+                valid.append(i)
+        per_shot.append(valid)
+
+    leftover = [i for i in range(dialogue_count) if i not in assigned]
+    if leftover and per_shot:
+        per_shot[-1].extend(leftover)
+    return per_shot
+
+
 async def generate_video_plan(scene: ComposedScenePayload) -> VideoPlanPayload:
     """Plans the camera/action/light for each shot via the Claude API, then
     deterministically builds `world`, splices it (plus the shared style and
     negative prompt) into every shot's `prompt` -- so appearance and look
-    never drift between shots or between scenes."""
+    never drift between shots or between scenes. Each shot also gets its own
+    `audio_prompt` carrying only the dialogue spoken in that shot."""
     result = await _request_shot_breakdown(_format_scene_for_llm(scene))
 
     world = _build_world(scene)
+    ambient = scene.location.ambient_sfx_prompt if scene.location else None
+    dialogue_by_shot = _assign_dialogue_to_shots(result.shots, len(scene.dialogue_script))
+
     shots = []
     for index, shot in enumerate(result.shots):
         # The first shot has no previous clip to relate to, no matter what the
         # model said -- enforce that deterministically rather than trusting the
         # schema's free-text-adjacent enum to always get it right.
         continuity = "cut_new_scene" if index == 0 else shot.continuity
+        shot_lines = [scene.dialogue_script[i] for i in dialogue_by_shot[index]]
         shots.append(
             VideoShotPayload(
                 shot_id=shot.shot_id,
@@ -249,6 +328,7 @@ async def generate_video_plan(scene: ComposedScenePayload) -> VideoPlanPayload:
                     continuity=continuity,
                     world=world,
                 ),
+                audio_prompt=_build_shot_audio_prompt(scene.characters, shot_lines, ambient),
             )
         )
     return VideoPlanPayload(world=world, shots=shots, negative_prompt=settings.video_negative_prompt)
