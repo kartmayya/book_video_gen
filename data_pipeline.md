@@ -12,6 +12,21 @@ hard continuity facts that constrain the scene.
 Canonical failure to prevent: a character who died in paragraph 58 must **not** appear when
 we visualize paragraph 240.
 
+### Why this design over a temporal database
+A temporal/bitemporal DB is purpose-built for "as-of N" interval queries, so it looks like the
+obvious fit — but it optimizes the wrong half of the system. The request-time artifact
+(`context_payloads`) is an **immutable, pre-resolved document**: once materialized, temporality
+is irrelevant to it and a plain document/KV read is already optimal. A temporal engine only helps
+the *write-side ledger*, and at a real cost — either a niche datastore (XTDB/Datomic) with a small
+ecosystem and learning curve, or a second engine bolted alongside the document store. The current
+design instead keeps the timeline as a plain integer (`reading_index`), owns the single interval
+invariant in a small single-writer reducer, and serves everything from one store — cheaper to
+operate and faster to ship. At MVP we are also **unitemporal** (one axis; the second `story_time`
+axis only matters once flashbacks land), so the bitemporal machinery a temporal DB provides buys
+little today. Engine-enforced interval correctness (PostgreSQL `int4range` + GiST exclusion
+constraints) remains the documented upgrade path (§10) if extraction-side errors ever make
+hand-maintained intervals a liability.
+
 ---
 
 ## 2. Validation Verdict (is this feasible / does it make sense?)
