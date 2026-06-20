@@ -43,7 +43,9 @@ from app.models import (
 )
 from ingestion.llm_client import GpuWorkerPool, LLMExtractionError
 from ingestion.schemas import (
+    CharacterProfileDelta,
     CharacterStateChange,
+    LocationProfileDelta,
     LocationStateChange,
     ParagraphBatchExtractionResult,
     ParagraphBeat,
@@ -58,8 +60,11 @@ REGISTRY_SYSTEM_PROMPT = (
     "You are a literary analyst extracting a character/location registry from a novel "
     "excerpt. Identify every distinct named character and location. For each, provide "
     "a baseline visual description and (for characters) a baseline voice description, "
-    "suitable as a generative-AI image/voice prompt. Only include entities clearly "
-    "established in this excerpt. Respond with JSON matching the provided schema only."
+    "suitable as a generative-AI image/voice prompt -- plus a narrative profile: for "
+    "characters, their backstory, personality traits, speech patterns, current "
+    "motivations, and relationships to other named characters; for locations, their "
+    "history and narrative significance. Only include entities clearly established in "
+    "this excerpt. Respond with JSON matching the provided schema only."
 )
 
 BEATS_SYSTEM_PROMPT_TEMPLATE = (
@@ -69,10 +74,13 @@ BEATS_SYSTEM_PROMPT_TEMPLATE = (
     "identify which registry entities are active, the camera framing, a one-line action "
     "summary, any dialogue, and discrete sound-effect prompts. Only emit a "
     "character_state_changes or location_state_changes entry for an entity if THIS "
-    "paragraph changes their appearance, emotional state, voice, atmosphere, or "
-    "lighting -- omit entities whose state is unchanged. Use only names that appear in "
-    "the registry below; do not invent new entities. Respond with JSON matching the "
-    "provided schema only.\n\n"
+    "paragraph changes their appearance, emotional state, voice, atmosphere, lighting, "
+    "personality, motivation, or a relationship -- omit entities whose state is "
+    "unchanged. Within a state-change entry, only set the profile_delta field (and its "
+    "sub-fields) if a personality/motivation/relationship/history actually changed this "
+    "paragraph; leave it null otherwise -- never restate an unchanged value. Use only "
+    "names that appear in the registry below; do not invent new entities. Respond with "
+    "JSON matching the provided schema only.\n\n"
     "KNOWN CHARACTERS: {characters}\n"
     "KNOWN LOCATIONS: {locations}"
 )
@@ -93,6 +101,8 @@ class RegistryMaps:
     location_id_by_name: dict[str, int] = field(default_factory=dict)
     character_summaries: list[str] = field(default_factory=list)
     location_summaries: list[str] = field(default_factory=list)
+    character_profile_by_id: dict[int, dict] = field(default_factory=dict)
+    location_profile_by_id: dict[int, dict] = field(default_factory=dict)
 
     def resolve_character(self, name: str) -> int | None:
         return self.character_id_by_name.get(name.strip().lower())
@@ -134,6 +144,35 @@ def _chunked(items: list, size: int) -> list[list]:
 
 def _normalize(name: str) -> str:
     return name.strip().lower()
+
+
+def _merge_character_profile(base: dict, delta: CharacterProfileDelta | None) -> dict:
+    """Overlays a sparse CharacterProfileDelta onto a full profile snapshot,
+    producing the new full snapshot. Same carry-forward semantics as the
+    scalar appearance_delta/emotional_state columns: a delta field left
+    null/empty means 'no change', not 'erase'."""
+    if delta is None:
+        return base
+    merged = dict(base)
+    if delta.personality_shift:
+        merged["personality_note"] = delta.personality_shift
+    if delta.new_motivation:
+        merged["motivations"] = delta.new_motivation
+    if delta.relationship_changes:
+        merged["relationships"] = {**base.get("relationships", {}), **delta.relationship_changes}
+    return merged
+
+
+def _merge_location_profile(base: dict, delta: LocationProfileDelta | None) -> dict:
+    """Location equivalent of _merge_character_profile."""
+    if delta is None:
+        return base
+    merged = dict(base)
+    if delta.history_reveal:
+        merged["history"] = delta.history_reveal
+    if delta.narrative_significance_update:
+        merged["narrative_significance"] = delta.narrative_significance_update
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -181,9 +220,11 @@ async def run_pass_1_registry(
                     aliases=candidate.aliases,
                     baseline_visual_description=candidate.baseline_visual_description,
                     baseline_voice_description=candidate.baseline_voice_description,
+                    extended_profile=candidate.profile.model_dump(),
                 )
             else:
                 # Merge in any newly-seen aliases for an already-known character.
+                # First chunk's profile wins (same precedent as baseline_visual_description above).
                 existing = merged_characters[key]
                 existing.aliases = sorted(set(existing.aliases) | set(candidate.aliases))
 
@@ -196,6 +237,7 @@ async def run_pass_1_registry(
                     aliases=candidate.aliases,
                     baseline_visual_description=candidate.baseline_visual_description,
                     baseline_ambient_sfx_prompt=candidate.baseline_ambient_sfx_prompt,
+                    extended_profile=candidate.profile.model_dump(),
                 )
             else:
                 existing = merged_locations[key]
@@ -212,12 +254,14 @@ async def run_pass_1_registry(
             for alias in character.aliases:
                 maps.character_id_by_name[_normalize(alias)] = character.character_id
             maps.character_summaries.append(f"{character.canonical_name} (aliases: {', '.join(character.aliases) or 'none'})")
+            maps.character_profile_by_id[character.character_id] = character.extended_profile
 
         for location in merged_locations.values():
             maps.location_id_by_name[_normalize(location.canonical_name)] = location.location_id
             for alias in location.aliases:
                 maps.location_id_by_name[_normalize(alias)] = location.location_id
             maps.location_summaries.append(f"{location.canonical_name} (aliases: {', '.join(location.aliases) or 'none'})")
+            maps.location_profile_by_id[location.location_id] = location.extended_profile
 
         book = await session.get(Book, book_id)
         book.ingestion_status = "registry_pass_complete"
@@ -360,11 +404,26 @@ async def _apply_beats_sequentially(
                 if existing is None:
                     merged_character_changes[change.character_name] = change
                 else:
+                    merged_profile_delta = None
+                    if existing.profile_delta or change.profile_delta:
+                        existing_pd = existing.profile_delta
+                        change_pd = change.profile_delta
+                        merged_profile_delta = CharacterProfileDelta(
+                            personality_shift=(change_pd and change_pd.personality_shift)
+                            or (existing_pd and existing_pd.personality_shift),
+                            new_motivation=(change_pd and change_pd.new_motivation)
+                            or (existing_pd and existing_pd.new_motivation),
+                            relationship_changes={
+                                **((existing_pd and existing_pd.relationship_changes) or {}),
+                                **((change_pd and change_pd.relationship_changes) or {}),
+                            },
+                        )
                     merged_character_changes[change.character_name] = CharacterStateChange(
                         character_name=change.character_name,
                         appearance_delta=change.appearance_delta or existing.appearance_delta,
                         emotional_state=change.emotional_state or existing.emotional_state,
                         vocal_delta_prompt=change.vocal_delta_prompt or existing.vocal_delta_prompt,
+                        profile_delta=merged_profile_delta,
                     )
 
             for change in merged_character_changes.values():
@@ -378,6 +437,9 @@ async def _apply_beats_sequentially(
                     continue
 
                 previous_state = character_latest_state.get(character_id)
+                previous_profile = (
+                    previous_state.profile_snapshot if previous_state is not None else None
+                ) or registry.character_profile_by_id.get(character_id, {})
                 new_state = CharacterState(
                     character_id=character_id,
                     valid_from_paragraph_id=paragraph.paragraph_id,
@@ -388,6 +450,7 @@ async def _apply_beats_sequentially(
                     or (previous_state.emotional_state if previous_state else None),
                     vocal_delta_prompt=change.vocal_delta_prompt
                     or (previous_state.vocal_delta_prompt if previous_state else None),
+                    profile_snapshot=_merge_character_profile(previous_profile, change.profile_delta),
                 )
                 if previous_state is not None:
                     previous_state.valid_until_paragraph_id = paragraph.paragraph_id
@@ -401,11 +464,22 @@ async def _apply_beats_sequentially(
                 if existing is None:
                     merged_location_changes[change.location_name] = change
                 else:
+                    merged_profile_delta = None
+                    if existing.profile_delta or change.profile_delta:
+                        existing_pd = existing.profile_delta
+                        change_pd = change.profile_delta
+                        merged_profile_delta = LocationProfileDelta(
+                            history_reveal=(change_pd and change_pd.history_reveal)
+                            or (existing_pd and existing_pd.history_reveal),
+                            narrative_significance_update=(change_pd and change_pd.narrative_significance_update)
+                            or (existing_pd and existing_pd.narrative_significance_update),
+                        )
                     merged_location_changes[change.location_name] = LocationStateChange(
                         location_name=change.location_name,
                         atmosphere_delta=change.atmosphere_delta or existing.atmosphere_delta,
                         lighting_state=change.lighting_state or existing.lighting_state,
                         ambient_sfx_delta=change.ambient_sfx_delta or existing.ambient_sfx_delta,
+                        profile_delta=merged_profile_delta,
                     )
 
             for change in merged_location_changes.values():
@@ -419,6 +493,9 @@ async def _apply_beats_sequentially(
                     continue
 
                 previous_state = location_latest_state.get(location_id)
+                previous_profile = (
+                    previous_state.profile_snapshot if previous_state is not None else None
+                ) or registry.location_profile_by_id.get(location_id, {})
                 new_state = LocationState(
                     location_id=location_id,
                     valid_from_paragraph_id=paragraph.paragraph_id,
@@ -429,6 +506,7 @@ async def _apply_beats_sequentially(
                     or (previous_state.lighting_state if previous_state else None),
                     ambient_sfx_delta=change.ambient_sfx_delta
                     or (previous_state.ambient_sfx_delta if previous_state else None),
+                    profile_snapshot=_merge_location_profile(previous_profile, change.profile_delta),
                 )
                 if previous_state is not None:
                     previous_state.valid_until_paragraph_id = paragraph.paragraph_id

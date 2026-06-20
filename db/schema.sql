@@ -51,6 +51,10 @@ CREATE TABLE characters (
     baseline_visual_description TEXT NOT NULL,                  -- immutable physical description fed to the video diffusion model (face, build, base wardrobe)
     baseline_voice_description  TEXT NOT NULL,                  -- text vocal prompt (timbre, accent, cadence) used when no cloned reference audio exists
     voice_reference_audio_uri   TEXT,                           -- optional path/URL to a clean speech sample for XTTS voice cloning
+    extended_profile             JSONB NOT NULL DEFAULT '{}'::jsonb,
+        -- immutable baseline narrative profile: backstory, personality_traits (list),
+        -- speech_patterns, motivations, relationships ({other canonical_name: description}).
+        -- JSONB (not fixed columns) so new narrative attributes don't require a migration.
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_characters_book_name UNIQUE (book_id, canonical_name)
@@ -65,6 +69,8 @@ CREATE TABLE locations (
     aliases                       TEXT[] NOT NULL DEFAULT '{}',
     baseline_visual_description   TEXT NOT NULL,                -- immutable establishing-shot description (architecture, terrain, palette)
     baseline_ambient_sfx_prompt   TEXT NOT NULL,                 -- default Stable Audio prompt for this location's ambience when no delta is active
+    extended_profile               JSONB NOT NULL DEFAULT '{}'::jsonb,
+        -- immutable baseline narrative profile: history, narrative_significance.
     created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_locations_book_name UNIQUE (book_id, canonical_name)
@@ -128,6 +134,8 @@ CREATE TABLE character_states (
     appearance_delta                TEXT,            -- e.g. "wearing a torn cloak, fresh cut above left eye"; NULL = no visual change from prior state
     emotional_state                  TEXT,            -- e.g. "terrified, breathing hard"
     vocal_delta_prompt                 TEXT,          -- e.g. "raspy, out of breath, whispering"; NULL = baseline voice still applies
+    profile_snapshot                     JSONB,        -- full current narrative profile (same shape as characters.extended_profile);
+                                                        -- NULL until the first profile-affecting change, then carries forward like the columns above
     created_at                          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT chk_character_state_range CHECK (
@@ -150,6 +158,8 @@ CREATE TABLE location_states (
     atmosphere_delta                TEXT,            -- e.g. "rain-soaked, fog rolling in"
     lighting_state                    TEXT,           -- e.g. "lit only by a guttering torch"
     ambient_sfx_delta                   TEXT,         -- overrides baseline_ambient_sfx_prompt while this state is active
+    profile_snapshot                      JSONB,       -- full current narrative profile (same shape as locations.extended_profile);
+                                                        -- NULL until the first profile-affecting change, then carries forward like the columns above
     created_at                           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT chk_location_state_range CHECK (

@@ -25,6 +25,7 @@ class CharacterContextPayload(BaseModel):
     voice_description: str
     voice_reference_audio_uri: str | None
     emotional_state: str | None
+    profile: dict
 
 
 class LocationContextPayload(BaseModel):
@@ -33,6 +34,7 @@ class LocationContextPayload(BaseModel):
     visual_description: str
     lighting_state: str | None
     ambient_sfx_prompt: str
+    profile: dict
 
 
 class GenerationContextPayload(BaseModel):
@@ -49,3 +51,4 @@ class GenerationContextPayload(BaseModel):
     location: LocationContextPayload | None
     dialogue_script: list[DialogueLinePayload]
     sfx_prompts: list[str]
+    narrative_context: str

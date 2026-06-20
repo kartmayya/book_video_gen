@@ -57,6 +57,7 @@ class Character(Base):
     baseline_visual_description: Mapped[str] = mapped_column(Text, nullable=False)
     baseline_voice_description: Mapped[str] = mapped_column(Text, nullable=False)
     voice_reference_audio_uri: Mapped[str | None] = mapped_column(Text)
+    extended_profile: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 
     book: Mapped[Book] = relationship(back_populates="characters")
@@ -73,6 +74,7 @@ class Location(Base):
     aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     baseline_visual_description: Mapped[str] = mapped_column(Text, nullable=False)
     baseline_ambient_sfx_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    extended_profile: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 
     book: Mapped[Book] = relationship(back_populates="locations")
@@ -140,6 +142,7 @@ class CharacterState(Base):
     appearance_delta: Mapped[str | None] = mapped_column(Text)
     emotional_state: Mapped[str | None] = mapped_column(Text)
     vocal_delta_prompt: Mapped[str | None] = mapped_column(Text)
+    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 
     character: Mapped[Character] = relationship(back_populates="states")
@@ -159,6 +162,7 @@ class LocationState(Base):
     atmosphere_delta: Mapped[str | None] = mapped_column(Text)
     lighting_state: Mapped[str | None] = mapped_column(Text)
     ambient_sfx_delta: Mapped[str | None] = mapped_column(Text)
+    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[dt.datetime] = mapped_column(server_default=func.now())
 
     location: Mapped[Location] = relationship(back_populates="states")

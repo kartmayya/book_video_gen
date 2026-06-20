@@ -18,6 +18,31 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
+class CharacterProfile(BaseModel):
+    """Baseline (immutable) narrative profile, stored as-is into
+    characters.extended_profile JSONB. Kept as an explicit schema (not a
+    free-form dict) so vLLM's structured decoding can actually constrain it
+    -- a JSONB storage column does not mean the extraction schema should be
+    unconstrained."""
+
+    backstory: str = Field(..., description="The character's history prior to/independent of this book's events")
+    personality_traits: list[str] = Field(default_factory=list, description="e.g. ['proud', 'impulsive', 'fiercely loyal']")
+    speech_patterns: str = Field(..., description="How they talk: vocabulary, verbal tics, formality")
+    motivations: str = Field(..., description="What this character currently wants/is driving toward")
+    relationships: dict[str, str] = Field(
+        default_factory=dict,
+        description="Other characters' canonical_name -> this character's baseline relationship/feelings toward them",
+    )
+
+
+class LocationProfile(BaseModel):
+    """Baseline (immutable) narrative profile, stored as-is into
+    locations.extended_profile JSONB."""
+
+    history: str = Field(..., description="This location's backstory/history prior to the book's events")
+    narrative_significance: str = Field(..., description="Why this location matters to the story")
+
+
 class CharacterCandidate(BaseModel):
     canonical_name: str = Field(..., description="The character's most formal/complete name")
     aliases: list[str] = Field(default_factory=list, description="Nicknames, titles, or shortened names used in the text")
@@ -27,6 +52,7 @@ class CharacterCandidate(BaseModel):
     baseline_voice_description: str = Field(
         ..., description="Vocal character: timbre, accent, pace, register"
     )
+    profile: CharacterProfile
 
 
 class LocationCandidate(BaseModel):
@@ -38,6 +64,7 @@ class LocationCandidate(BaseModel):
     baseline_ambient_sfx_prompt: str = Field(
         ..., description="Default ambient soundscape text prompt for this location"
     )
+    profile: LocationProfile
 
 
 class RegistryExtractionResult(BaseModel):
@@ -69,24 +96,52 @@ class DialogueLine(BaseModel):
     delivery: str = Field(..., description="e.g. 'whispered', 'shouted across the room'")
 
 
+class CharacterProfileDelta(BaseModel):
+    """Sparse: only set fields that actually changed this paragraph. Merged
+    into the character's running profile snapshot (see ingestion/orchestrator.py
+    _merge_profile) -- unset fields here mean 'no change', not 'erase'."""
+
+    personality_shift: str | None = Field(None, description="A new personality development, or null if unchanged")
+    new_motivation: str | None = Field(None, description="An updated driving motivation, or null if unchanged")
+    relationship_changes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Other characters' canonical_name -> updated relationship, only for relationships that changed this paragraph",
+    )
+
+
+class LocationProfileDelta(BaseModel):
+    """Sparse: only set fields that actually changed this paragraph."""
+
+    history_reveal: str | None = Field(None, description="New historical detail revealed this paragraph, or null")
+    narrative_significance_update: str | None = Field(None, description="Updated narrative significance, or null if unchanged")
+
+
 class CharacterStateChange(BaseModel):
     """Emitted ONLY when this paragraph changes a character's appearance,
-    emotional state, or voice relative to their last known state."""
+    emotional state, voice, personality, motivation, or a relationship
+    relative to their last known state."""
 
     character_name: str
     appearance_delta: str | None = Field(None, description="New visual detail, or null if unchanged")
     emotional_state: str | None = None
     vocal_delta_prompt: str | None = Field(None, description="New vocal quality, or null if unchanged")
+    profile_delta: CharacterProfileDelta | None = Field(
+        None, description="Only present if personality/motivation/a relationship changed this paragraph"
+    )
 
 
 class LocationStateChange(BaseModel):
     """Emitted ONLY when this paragraph changes the active location's
-    atmosphere, lighting, or ambient sound relative to its last known state."""
+    atmosphere, lighting, ambient sound, history, or narrative significance
+    relative to its last known state."""
 
     location_name: str
     atmosphere_delta: str | None = None
     lighting_state: str | None = None
     ambient_sfx_delta: str | None = None
+    profile_delta: LocationProfileDelta | None = Field(
+        None, description="Only present if history/narrative significance changed this paragraph"
+    )
 
 
 class ParagraphBeat(BaseModel):

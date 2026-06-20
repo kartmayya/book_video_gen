@@ -65,13 +65,14 @@ _COMPILE_QUERY = text(
                         'visual_description', COALESCE(cs.appearance_delta, c.baseline_visual_description),
                         'voice_description', COALESCE(cs.vocal_delta_prompt, c.baseline_voice_description),
                         'voice_reference_audio_uri', c.voice_reference_audio_uri,
-                        'emotional_state', cs.emotional_state
+                        'emotional_state', cs.emotional_state,
+                        'profile', COALESCE(cs.profile_snapshot, c.extended_profile)
                     )
                 )
                 FROM paragraph_characters pc
                 JOIN characters c ON c.character_id = pc.character_id
                 LEFT JOIN LATERAL (
-                    SELECT cs2.appearance_delta, cs2.emotional_state, cs2.vocal_delta_prompt
+                    SELECT cs2.appearance_delta, cs2.emotional_state, cs2.vocal_delta_prompt, cs2.profile_snapshot
                     FROM character_states cs2
                     JOIN paragraphs pf ON pf.paragraph_id = cs2.valid_from_paragraph_id
                     LEFT JOIN paragraphs pu ON pu.paragraph_id = cs2.valid_until_paragraph_id
@@ -91,11 +92,12 @@ _COMPILE_QUERY = text(
                 'name', l.canonical_name,
                 'visual_description', COALESCE(ls.atmosphere_delta, l.baseline_visual_description),
                 'lighting_state', ls.lighting_state,
-                'ambient_sfx_prompt', COALESCE(ls.ambient_sfx_delta, l.baseline_ambient_sfx_prompt)
+                'ambient_sfx_prompt', COALESCE(ls.ambient_sfx_delta, l.baseline_ambient_sfx_prompt),
+                'profile', COALESCE(ls.profile_snapshot, l.extended_profile)
             )
             FROM locations l
             LEFT JOIN LATERAL (
-                SELECT ls2.atmosphere_delta, ls2.lighting_state, ls2.ambient_sfx_delta
+                SELECT ls2.atmosphere_delta, ls2.lighting_state, ls2.ambient_sfx_delta, ls2.profile_snapshot
                 FROM location_states ls2
                 JOIN paragraphs pf ON pf.paragraph_id = ls2.valid_from_paragraph_id
                 LEFT JOIN paragraphs pu ON pu.paragraph_id = ls2.valid_until_paragraph_id
@@ -110,6 +112,45 @@ _COMPILE_QUERY = text(
     FROM target t
     """
 )
+
+
+def _compose_narrative_prompt(
+    characters: list[CharacterContextPayload],
+    location: LocationContextPayload | None,
+    action_summary: str,
+) -> str:
+    """Flattens the structured story-state into one prose block. Diffusion
+    video models take a text prompt, not a JSON tree -- this is the piece
+    that actually turns "story state at sequence_index N" into something
+    you can hand to one."""
+    lines: list[str] = []
+
+    if location is not None:
+        location_line = f"Setting: {location.name} -- {location.visual_description}"
+        history = location.profile.get("history")
+        if history:
+            location_line += f" ({history})"
+        lines.append(location_line)
+
+    for character in characters:
+        profile = character.profile
+        character_line = f"{character.name}: {character.visual_description}"
+        if character.emotional_state:
+            character_line += f", currently {character.emotional_state}"
+        personality_bits = profile.get("personality_traits") or []
+        if personality_bits:
+            character_line += f"; personality: {', '.join(personality_bits)}"
+        personality_note = profile.get("personality_note")
+        if personality_note:
+            character_line += f" ({personality_note})"
+        relationships = profile.get("relationships") or {}
+        if relationships:
+            relationship_bits = "; ".join(f"{name}: {desc}" for name, desc in relationships.items())
+            character_line += f"; relationships -- {relationship_bits}"
+        lines.append(character_line)
+
+    lines.append(f"Action: {action_summary}")
+    return " | ".join(lines)
 
 
 @router.get("/generate-context/{paragraph_id}", response_model=GenerationContextPayload)
@@ -131,6 +172,7 @@ async def generate_context(
             voice_description=c["voice_description"],
             voice_reference_audio_uri=c["voice_reference_audio_uri"],
             emotional_state=c["emotional_state"],
+            profile=c["profile"] or {},
         )
         for c in row["characters_json"]
     ]
@@ -144,6 +186,7 @@ async def generate_context(
             visual_description=location_json["visual_description"],
             lighting_state=location_json["lighting_state"],
             ambient_sfx_prompt=location_json["ambient_sfx_prompt"],
+            profile=location_json["profile"] or {},
         )
         if location_json is not None
         else None
@@ -183,4 +226,5 @@ async def generate_context(
         location=location,
         dialogue_script=dialogue_script,
         sfx_prompts=list(row["sfx_prompts"]),
+        narrative_context=_compose_narrative_prompt(characters, location, row["action_summary"]),
     )
