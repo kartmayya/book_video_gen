@@ -24,6 +24,14 @@ ffmpeg -version 2>&1 | head -1
 # ── Python venv ──────────────────────────────────────────────────────────────
 echo ""
 echo "Creating virtual environment..."
+
+# Ensure python3-venv is available (missing on many minimal Ubuntu installs)
+PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if ! python3 -m venv --help &>/dev/null 2>&1; then
+  echo "Installing python${PYVER}-venv..."
+  apt-get install -y "python${PYVER}-venv" || { echo "ERROR: could not install python${PYVER}-venv"; exit 1; }
+fi
+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip --quiet
