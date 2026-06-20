@@ -17,9 +17,8 @@ SAMPLE_RATE = 16000
 def load_model() -> AudioGen:
     device_env = os.getenv("SFX_GPU_DEVICE", "cuda:2")
     device = device_env if torch.cuda.is_available() else "cpu"
-    model = AudioGen.get_pretrained("facebook/audiogen-medium")
+    model = AudioGen.get_pretrained("facebook/audiogen-medium", device=device)
     model.set_generation_params(duration=DEFAULT_DURATION)
-    model.to(device)
     return model
 
 
