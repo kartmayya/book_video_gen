@@ -11,10 +11,13 @@ import asyncio
 import os
 import subprocess
 import sys
+from array import array
 from collections.abc import AsyncIterator
 
 TARGET_RATE = 44100
 TARGET_WIDTH = 2  # s16le = 2 bytes per sample
+SFX_WEIGHT = 0.22  # ambient volume relative to vocal
+TARGET_PEAK = 0.85  # normalize dialogue to 85% of full scale
 
 
 def _build_silence_pcm(duration_ms: int) -> bytes:
@@ -23,13 +26,32 @@ def _build_silence_pcm(duration_ms: int) -> bytes:
     return bytes(num_samples * TARGET_WIDTH)
 
 
+def _normalize_pcm(pcm: bytes, target_peak: float = TARGET_PEAK) -> bytes:
+    """Peak-normalize s16le mono PCM to target_peak of full scale (32767).
+
+    Leaves silence unchanged. All dialogue lines are normalized independently
+    so the same character's voice has consistent perceived loudness across a
+    multi-line scene.
+    """
+    if len(pcm) < 2:
+        return pcm
+    samples = array("h")
+    samples.frombytes(pcm)
+    peak = max(max(samples), abs(min(samples)))
+    if peak == 0:
+        return pcm
+    scale = 32767 * target_peak / peak
+    normalized = array("h", (int(s * scale) for s in samples))
+    return normalized.tobytes()
+
+
 def _concat_dialogues(dialogue_pcms: list[bytes], gap_ms: int) -> bytes:
-    """Concatenate dialogue PCMs with silence gaps."""
+    """Concatenate dialogue PCMs with silence gaps, normalizing each line."""
     parts: list[bytes] = []
     for i, pcm in enumerate(dialogue_pcms):
         if i > 0:
             parts.append(_build_silence_pcm(gap_ms))
-        parts.append(pcm)
+        parts.append(_normalize_pcm(pcm))
     return b"".join(parts)
 
 
@@ -72,7 +94,7 @@ def _build_filter_cmd(
         filters.append("[0:a]anull[vocal]")
         filters.append(f"[1:a]atrim=duration={target_sec}[ambient]")
         filters.append(
-            "[vocal][ambient]amix=inputs=2:duration=first:weights=1 0.55[out]"
+            f"[vocal][ambient]amix=inputs=2:duration=first:weights=1 {SFX_WEIGHT}[out]"
         )
     else:
         filters.append(f"[0:a]atrim=duration={target_sec}[out]")
