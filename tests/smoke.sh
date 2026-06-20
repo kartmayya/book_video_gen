@@ -6,6 +6,12 @@ set -euo pipefail
 PASS=0
 FAIL=0
 
+# Ports match launcher.sh (read from .env via the Makefile).
+DIRECTOR_PORT=${DIRECTOR_PORT:-8000}
+TTS_PORT=${TTS_PORT:-8001}
+SFX_PORT=${SFX_PORT:-8002}
+MIXER_PORT=${MIXER_PORT:-8003}
+
 check() {
   local name=$1; shift
   if "$@"; then
@@ -19,14 +25,14 @@ check() {
 
 # ── Health checks ─────────────────────────────────────────────────────────────
 echo "=== Health checks ==="
-for port in 8000 8001 8002 8003; do
+for port in "$DIRECTOR_PORT" "$TTS_PORT" "$SFX_PORT" "$MIXER_PORT"; do
   check "health:$port" curl -sf "http://localhost:$port/health" -o /dev/null
 done
 
 # ── Director: highlight → ScriptBlock ────────────────────────────────────────
 echo ""
 echo "=== Director: highlight → ScriptBlock ==="
-SCRIPT_RESPONSE=$(curl -s -X POST http://localhost:8000/script \
+SCRIPT_RESPONSE=$(curl -s -X POST "http://localhost:${DIRECTOR_PORT}/script" \
   -H "Content-Type: application/json" \
   -d '{
     "highlight": "I saw the old man shudder. His eye was upon me.",
@@ -54,7 +60,7 @@ check "director:has_dialogue" \
 # ── TTS: dialogue → PCM ───────────────────────────────────────────────────────
 echo ""
 echo "=== TTS: dialogue → PCM ==="
-curl -sf -X POST http://localhost:8001/synthesize \
+curl -sf -X POST "http://localhost:${TTS_PORT}/synthesize" \
   -H "Content-Type: application/json" \
   -d '{
     "dialogue": "[ominously] His vulture eye fell upon me.",
@@ -74,7 +80,7 @@ check "tts:valid_wav" test "$WAV_BYTES" -gt 44  # WAV header is 44 bytes
 # ── SFX: prompts → WAV cues ───────────────────────────────────────────────────
 echo ""
 echo "=== SFX: prompts → WAV cues ==="
-SFX_RESPONSE=$(curl -sf -X POST http://localhost:8002/generate \
+SFX_RESPONSE=$(curl -sf -X POST "http://localhost:${SFX_PORT}/generate" \
   -H "Content-Type: application/json" \
   -d '{
     "sequence_id": "smoke_001",
@@ -120,7 +126,7 @@ except Exception:
     }))
 ")
 
-curl -sf -X POST http://localhost:8003/mix \
+curl -sf -X POST "http://localhost:${MIXER_PORT}/mix" \
   -H "Content-Type: application/json" \
   -d "$BLOCK" > /tmp/smoke_mix.mp3
 

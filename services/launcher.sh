@@ -9,21 +9,29 @@ set -e
 UVICORN=".venv/bin/uvicorn"
 [ -x "$UVICORN" ] || UVICORN="uvicorn"
 
+# Service ports are overridable so they can dodge ports already taken on the host
+# (e.g. a provider's nginx squatting on 8001). Set these in .env to change them;
+# `make start/wait/smoke` all read the same values.
+DIRECTOR_PORT=${DIRECTOR_PORT:-8000}
+TTS_PORT=${TTS_PORT:-8001}
+SFX_PORT=${SFX_PORT:-8002}
+MIXER_PORT=${MIXER_PORT:-8003}
+
 SGLANG_DIRECTOR_URL=${SGLANG_DIRECTOR_URL:-http://localhost:30000} \
-  "$UVICORN" services.director.main:app --host 0.0.0.0 --port 8000 &
+  "$UVICORN" services.director.main:app --host 0.0.0.0 --port "$DIRECTOR_PORT" &
 PID_DIRECTOR=$!
 
 SGLANG_TTS_URL=${SGLANG_TTS_URL:-http://localhost:30001} \
-  "$UVICORN" services.tts.main:app --host 0.0.0.0 --port 8001 &
+  "$UVICORN" services.tts.main:app --host 0.0.0.0 --port "$TTS_PORT" &
 PID_TTS=$!
 
 SFX_GPU_DEVICE=${SFX_GPU_DEVICE:-cuda:2} \
-  "$UVICORN" services.sfx.main:app --host 0.0.0.0 --port 8002 &
+  "$UVICORN" services.sfx.main:app --host 0.0.0.0 --port "$SFX_PORT" &
 PID_SFX=$!
 
-TTS_SERVICE_URL=http://localhost:8001 \
-SFX_SERVICE_URL=http://localhost:8002 \
-  "$UVICORN" services.mixer.main:app --host 0.0.0.0 --port 8003 &
+TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:$TTS_PORT} \
+SFX_SERVICE_URL=${SFX_SERVICE_URL:-http://localhost:$SFX_PORT} \
+  "$UVICORN" services.mixer.main:app --host 0.0.0.0 --port "$MIXER_PORT" &
 PID_MIXER=$!
 
 trap "kill $PID_DIRECTOR $PID_TTS $PID_SFX $PID_MIXER 2>/dev/null; wait" EXIT SIGINT SIGTERM

@@ -21,7 +21,7 @@ test:
 
 # Curl-based smoke tests — requires all 4 services running
 smoke:
-	bash tests/smoke.sh
+	@[ -f .env ] && export $$(cat .env | grep -v '^#' | xargs); bash tests/smoke.sh
 
 # WebSocket TTFAB latency test — requires all 4 services + inference servers
 e2e:
@@ -37,4 +37,4 @@ start:
 
 # Block until all 4 /health endpoints respond (use before smoke/e2e)
 wait:
-	bash scripts/wait_for_services.sh
+	@[ -f .env ] && export $$(cat .env | grep -v '^#' | xargs); bash scripts/wait_for_services.sh
