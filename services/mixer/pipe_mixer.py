@@ -4,9 +4,9 @@ import base64
 import io
 import os
 import subprocess
+import sys
 import wave
 from collections.abc import AsyncIterator
-
 
 TARGET_RATE = 44100
 TARGET_WIDTH = 2  # s16le = 2 bytes per sample
@@ -35,17 +35,39 @@ def _decode_sfx_cue_to_pcm(audio_b64: str) -> bytes:
 def _build_ffmpeg_cmd(vocal_fd: int, sfx_fd: int) -> list[str]:
     return [
         "ffmpeg",
-        "-f", "s16le", "-ar", "44100", "-ac", "1", "-i", f"pipe:{vocal_fd}",
-        "-f", "s16le", "-ar", "44100", "-ac", "1", "-i", f"pipe:{sfx_fd}",
+        "-f",
+        "s16le",
+        "-ar",
+        "44100",
+        "-ac",
+        "1",
+        "-i",
+        f"pipe:{vocal_fd}",
+        "-f",
+        "s16le",
+        "-ar",
+        "44100",
+        "-ac",
+        "1",
+        "-i",
+        f"pipe:{sfx_fd}",
         "-filter_complex",
         "[0:a]volume=1.0[vocal];[1:a]volume=0.55[ambient];[vocal][ambient]amix=inputs=2:duration=first[out]",
-        "-map", "[out]",
-        "-f", "mp3", "-q:a", "4", "pipe:1",
-        "-loglevel", "error",
+        "-map",
+        "[out]",
+        "-f",
+        "mp3",
+        "-q:a",
+        "4",
+        "pipe:1",
+        "-loglevel",
+        "error",
     ]
 
 
-async def _write_all_to_fd(fd: int, data: bytes, loop: asyncio.AbstractEventLoop) -> None:
+async def _write_all_to_fd(
+    fd: int, data: bytes, loop: asyncio.AbstractEventLoop
+) -> None:
     view = memoryview(data)
     offset = 0
     while offset < len(view):
@@ -82,7 +104,9 @@ async def _pump_sfx(
         os.close(fd)
 
 
-def _read_ffmpeg_output(proc: subprocess.Popen, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
+def _read_ffmpeg_output(
+    proc: subprocess.Popen, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop
+) -> None:
     try:
         while True:
             chunk = proc.stdout.read(4096)
@@ -91,6 +115,15 @@ def _read_ffmpeg_output(proc: subprocess.Popen, queue: asyncio.Queue, loop: asyn
             asyncio.run_coroutine_threadsafe(queue.put(chunk), loop)
     finally:
         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+
+def _read_ffmpeg_stderr(proc: subprocess.Popen, sink: list[bytes]) -> None:
+    try:
+        data = proc.stderr.read()
+        if data:
+            sink.append(data)
+    except Exception:
+        pass
 
 
 async def mix_audio(
@@ -118,7 +151,11 @@ async def mix_audio(
 
     mp3_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
 
-    reader_future = loop.run_in_executor(None, _read_ffmpeg_output, proc, mp3_queue, loop)
+    reader_future = loop.run_in_executor(
+        None, _read_ffmpeg_output, proc, mp3_queue, loop
+    )
+    stderr_sink: list[bytes] = []
+    stderr_future = loop.run_in_executor(None, _read_ffmpeg_stderr, proc, stderr_sink)
 
     vocal_task = asyncio.create_task(_pump_vocal(vocal_w, vocal_chunks, loop))
     sfx_task = asyncio.create_task(_pump_sfx(sfx_w, sfx_b64_cues, loop))
@@ -134,4 +171,13 @@ async def mix_audio(
         sfx_task.cancel()
         await asyncio.gather(vocal_task, sfx_task, return_exceptions=True)
         await reader_future
+        await stderr_future
         proc.wait()
+        err = b"".join(stderr_sink).decode("utf-8", "replace").strip()
+        # With `-loglevel error` anything on stderr is a real failure; surface it.
+        if proc.returncode or err:
+            print(
+                f"[mixer] ffmpeg rc={proc.returncode}: {err}",
+                file=sys.stderr,
+                flush=True,
+            )
