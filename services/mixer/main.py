@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 
 import httpx
@@ -9,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from .multi_mixer import mix_multi_dialogue
 from .orchestrator import dispatch, dispatch_from_prompt
 from .pipe_mixer import mix_audio
-from .schema import AudioPromptRequest, ScriptBlock
+from .schema import AudioPromptRequest, MuxRequest, ScriptBlock
 
 _http_client: httpx.AsyncClient | None = None
 
@@ -134,6 +136,102 @@ async def audio_prompt_endpoint(request: AudioPromptRequest):
             yield chunk
 
     return StreamingResponse(generate(), media_type="audio/mpeg")
+
+
+@app.post("/mux")
+async def mux_endpoint(request: MuxRequest):
+    """Combine an existing video file with generated or existing audio."""
+    import subprocess
+    import tempfile
+
+    if not request.audio_prompt and not request.audio_path:
+        raise HTTPException(
+            status_code=422,
+            detail="Either audio_prompt or audio_path must be provided",
+        )
+    if not os.path.exists(request.video_path):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Video file not found: {request.video_path}",
+        )
+
+    audio_input: str
+    cleanup_audio = False
+
+    if request.audio_path:
+        if not os.path.exists(request.audio_path):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Audio file not found: {request.audio_path}",
+            )
+        audio_input = request.audio_path
+    else:
+        (
+            dialogue_pcms,
+            sfx_pcm,
+            total_duration_ms,
+            dialogue_texts,
+            _speaker_names,
+        ) = await dispatch_from_prompt(
+            _http_client,
+            request.audio_prompt,  # type: ignore[arg-type]
+            request.book_id,
+            gap_ms=request.gap_between_lines_ms,
+        )
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        audio_input = tmp.name
+        cleanup_audio = True
+        async for chunk in mix_multi_dialogue(
+            dialogue_pcms,
+            sfx_pcm,
+            total_duration_ms,
+            gap_ms=request.gap_between_lines_ms,
+            speed=request.speed,
+            dialogue_texts=dialogue_texts,
+        ):
+            tmp.write(chunk)
+        tmp.close()
+
+    async def mux_stream():
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-y",
+            "-i",
+            request.video_path,
+            "-i",
+            audio_input,
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-shortest",
+            "-f",
+            "mp4",
+            "pipe:1",
+            "-loglevel",
+            "error",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            while True:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            await proc.wait()
+            if cleanup_audio:
+                try:
+                    os.unlink(audio_input)
+                except OSError:
+                    pass
+
+    return StreamingResponse(mux_stream(), media_type="video/mp4")
 
 
 if __name__ == "__main__":
