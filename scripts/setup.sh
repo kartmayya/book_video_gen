@@ -66,6 +66,7 @@ pip install --quiet \
   "torch==2.1.0" \
   "torchaudio==2.1.0" \
   "torchvision==0.16.0" \
+  "numpy<2" \
   --index-url https://download.pytorch.org/whl/cu121
 
 echo "Installing audiocraft..."
