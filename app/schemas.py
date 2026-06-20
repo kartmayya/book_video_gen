@@ -117,6 +117,9 @@ class VideoShotPayload(BaseModel):
     light: str
     continuity: Literal["continuous_frame", "cut_same_scene", "cut_new_scene"]
     prompt: str
+    # The dialogue (+ ambient bed) voiced over THIS shot specifically, so it's
+    # clear what is spoken per clip rather than one lump prompt for the span.
+    audio_prompt: str = ""
 
 
 class VideoPlanPayload(BaseModel):
