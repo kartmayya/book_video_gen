@@ -26,7 +26,7 @@ done
 # ── Director: highlight → ScriptBlock ────────────────────────────────────────
 echo ""
 echo "=== Director: highlight → ScriptBlock ==="
-SCRIPT_RESPONSE=$(curl -sf -X POST http://localhost:8000/script \
+SCRIPT_RESPONSE=$(curl -s -X POST http://localhost:8000/script \
   -H "Content-Type: application/json" \
   -d '{
     "highlight": "I saw the old man shudder. His eye was upon me.",
@@ -36,9 +36,13 @@ SCRIPT_RESPONSE=$(curl -sf -X POST http://localhost:8000/script \
     ],
     "book_id": "poe-the-tell-tale-heart",
     "speaker_hint": "narrator"
-  }')
+  }' || true)
 
-echo "$SCRIPT_RESPONSE" | python3 -m json.tool
+if [[ -n "$SCRIPT_RESPONSE" ]]; then
+  echo "$SCRIPT_RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$SCRIPT_RESPONSE"
+else
+  echo "(Director returned empty — is vLLM running on port 30000?)"
+fi
 
 check "director:has_sequence_id" \
   python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert 'sequence_id' in d" "$SCRIPT_RESPONSE"
