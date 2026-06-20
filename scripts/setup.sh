@@ -43,7 +43,8 @@ pip install --quiet \
   "uvicorn[standard]>=0.29.0" \
   "pydantic>=2.0.0" \
   "httpx>=0.27.0" \
-  "websockets>=12.0"
+  "websockets>=12.0" \
+  "ormsgpack>=1.5.0"
 
 # ── System build deps for PyAV (required by audiocraft) ─────────────────────
 echo ""

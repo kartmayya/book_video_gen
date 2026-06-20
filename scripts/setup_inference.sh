@@ -11,9 +11,15 @@
 #   - fish-speech must be v1.5.1 — v2.0 changed the DAC hidden dim (512→1024),
 #     making it incompatible with the fish-speech-1.5 model weights
 #   - fish-speech deps must be installed with --no-deps then individually, because
-#     the full install backracks on zstandard for 30+ minutes and still fails
+#     the full `pip install -e .[stable]` backtracks on zstandard for 30+ minutes
+#     and still fails. The explicit list below is exhaustive on purpose — most of
+#     those modules are imported directly by fish-speech and are NOT transitive
+#     deps of each other, so a partial list fails one ModuleNotFoundError at a time
+#     (kui -> numpy -> audiotools -> dac -> pytorch_lightning -> funasr -> ...)
 #   - fish-speech 1.5.1 server uses --llama-checkpoint-path + --decoder-checkpoint-path
 #     (not --checkpoint-path, which was removed between v1.4 and v1.5.1)
+#   - the TTS client (services/tts/fish_audio.py) must POST ormsgpack to /v1/tts —
+#     fish-speech's native server has no OpenAI-style /v1/audio/speech route (404)
 #   - torch 2.5.1+cu121 works for fish-speech 1.5 inference despite the pyproject.toml
 #     saying torch==2.8.0 — 2.8.0 isn't available for cu121
 #   - AudioGen.get_pretrained() must receive device='cuda' (not 'cuda:2') because
@@ -65,18 +71,47 @@ git checkout v1.5.1
   "torch==2.5.1" "torchaudio==2.5.1" \
   --index-url https://download.pytorch.org/whl/cu121
 
-# Runtime deps needed for fish-speech 1.5.1 inference (discovered one by one)
+# Runtime deps for fish-speech 1.5.1 inference.
+#
+# This is the COMPLETE set the server actually imports. Installing a subset
+# triggers a long ModuleNotFoundError cascade at startup, one missing module at
+# a time (kui -> numpy -> audiotools -> dac -> pytorch_lightning -> funasr -> ...),
+# because most of these are imported directly by fish-speech and are NOT pulled
+# in transitively by the packages above. Keep the list exhaustive so the server
+# boots on the first try.
+#
+# transformers MUST stay <=4.57.3: newer (5.x) drops huggingface_hub<1.0 and the
+# `huggingface-cli` entry point used below, and changes the model loading path.
 /tmp/fish-venv/bin/pip install --quiet \
+  "transformers<=4.57.3" \
   "funasr" \
   "vector_quantize_pytorch==1.14.24" \
-  "lightning>=2.1.0" \
   "faster-whisper" \
+  "lightning>=2.1.0" \
   "descript-audio-codec" \
   "descript-audiotools" \
   "einx[torch]==0.2.2" \
+  "einops" \
   "opencc-python-reimplemented==0.1.7" \
   "resampy" \
-  "transformers<=4.57.3" \
+  "librosa" \
+  "numpy" \
+  "safetensors" \
+  "tiktoken" \
+  "hydra-core" \
+  "natsort" \
+  "grpcio" \
+  "pydub" \
+  "loralib" \
+  "zstandard" \
+  "kui" \
+  "msgpack" \
+  "ormsgpack" \
+  "loguru" \
+  "pydantic" \
+  "silero-vad" \
+  "cachetools" \
+  "rich" \
   "uvicorn[standard]"
 
 # Download fish-speech-1.5 checkpoint weights

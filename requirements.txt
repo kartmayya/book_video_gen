@@ -4,6 +4,9 @@ uvicorn[standard]>=0.29.0
 pydantic>=2.0.0
 httpx>=0.27.0
 
+# TTS — Fish Speech /v1/tts speaks msgpack, not JSON
+ormsgpack>=1.5.0
+
 # Mixer
 websockets>=12.0
 
@@ -12,5 +15,10 @@ websockets>=12.0
 torch==2.1.0
 torchaudio==2.1.0
 torchvision==0.16.0
-numpy>=1.24.0
+# numpy must stay <2: torch 2.1.0 was built against the NumPy 1.x ABI and
+# crashes at import ("_ARRAY_API not found") under numpy 2.x.
+numpy>=1.24.0,<2
+# audiocraft pulls in a transformers that needs torch>=2.4; pin to the last
+# release compatible with torch 2.1.0 (otherwise T5Conditioner fails at startup).
+transformers==4.44.2
 audiocraft
