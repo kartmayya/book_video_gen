@@ -201,18 +201,31 @@ async def mux_endpoint(request: MuxRequest):
 
     result = sp.run(
         [
-            "ffmpeg", "-y",
-            "-i", request.video_path,
-            "-i", audio_input,
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-map", "0:v", "-map", "1:a",
+            "ffmpeg",
+            "-y",
+            "-nostdin",
+            "-i",
+            request.video_path,
+            "-i",
+            audio_input,
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
             "-shortest",
-            "-f", "mp4",
+            "-f",
+            "mp4",
+            "-loglevel",
+            "error",
             out_path,
         ],
         capture_output=True,
         text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         if cleanup_audio:
